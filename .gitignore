@@ -1,0 +1,11 @@
+# Secrets — never commit real API keys
+FinanceTracker/Secrets.plist
+
+# Xcode
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+.swiftpm/
