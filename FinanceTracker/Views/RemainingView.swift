@@ -12,8 +12,12 @@ struct RemainingView: View {
         allEntries.inMonth(month).filter { $0.type == .expense }
     }
 
+    private func entries(for category: Category) -> [Entry] {
+        monthExpenses.filter { $0.category === category }
+    }
+
     private func spent(for category: Category) -> Decimal {
-        monthExpenses.filter { $0.category === category }.reduce(Decimal(0)) { $0 + $1.amount }
+        entries(for: category).reduce(Decimal(0)) { $0 + $1.amount }
     }
 
     private func budgeted(for category: Category) -> Decimal {
@@ -73,7 +77,8 @@ struct RemainingView: View {
                                 head: summary,
                                 categories: categories,
                                 spentFor: spent,
-                                budgetedFor: budgeted
+                                budgetedFor: budgeted,
+                                entriesFor: entries
                             )
                         }
                     }
