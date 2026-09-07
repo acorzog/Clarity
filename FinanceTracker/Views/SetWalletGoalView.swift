@@ -18,7 +18,7 @@ struct SetWalletGoalView: View {
                         .multilineTextAlignment(.center)
                         .focused($amountFieldFocused)
                         .onChange(of: amountText) { _, newValue in
-                            let filtered = newValue.filter { $0.isNumber || $0 == "." }
+                            let filtered = newValue.sanitizedDecimalInput()
                             if filtered != newValue { amountText = filtered }
                         }
                     Text(Locale.current.currencySymbol ?? "$")
@@ -33,7 +33,7 @@ struct SetWalletGoalView: View {
 
                 Button {
                     let trimmed = amountText.trimmingCharacters(in: .whitespaces)
-                    wallet.goalAmount = trimmed.isEmpty ? nil : Decimal(string: trimmed)
+                    wallet.goalAmount = trimmed.isEmpty ? nil : Decimal(decimalInput: trimmed)
                     dismiss()
                 } label: {
                     Text("Save")
@@ -59,7 +59,7 @@ struct SetWalletGoalView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             if let goal = wallet.goalAmount, goal > 0 {
-                amountText = "\(goal)"
+                amountText = goal.editableText()
             }
             amountFieldFocused = true
         }

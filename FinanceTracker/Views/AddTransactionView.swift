@@ -17,6 +17,8 @@ struct AddTransactionView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Wallet.name) private var allWallets: [Wallet]
+    @Query(sort: \Category.name) private var allCategories: [Category]
+    @ObservedObject private var preferences = AppPreferencesStore.shared
 
     private var wallets: [Wallet] { allWallets.filter { !$0.isArchived } }
 
@@ -25,6 +27,11 @@ struct AddTransactionView: View {
     @State private var selectedCategory: Category?
     @State private var selectedWallet: Wallet?
     @State private var destinationWallet: Wallet?
+    /// When true for an expense, the amount also moves to `destinationWallet` — e.g. money
+    /// spent from a shared wallet that should be accounted as moved into another one, rather
+    /// than just leaving the system. Wallet balance math already supports any entry carrying a
+    /// `destinationWallet` regardless of type, so this only needs UI + validation, no model change.
+    @State private var includesTransferToWallet = false
     @State private var note = ""
     @State private var date = Date.now
     @State private var recurrence: RecurrenceRule = .none
@@ -39,6 +46,7 @@ struct AddTransactionView: View {
     /// The note text as loaded — auto-categorization only fires once this diverges,
     /// so opening an existing entry for editing doesn't immediately re-suggest/spend an API call.
     @State private var noteAtLoad = ""
+    @State private var showingSharedEvent = false
 
     @FocusState private var amountFieldFocused: Bool
 
@@ -84,13 +92,39 @@ struct AddTransactionView: View {
                             ) {
                                 showingCategoryPicker = true
                             }
-                            SelectionRow(
-                                title: "Wallet",
-                                iconName: selectedWallet?.icon,
-                                iconColorHex: selectedWallet?.colorHex,
-                                valueName: selectedWallet?.name
-                            ) {
-                                showingSourceWalletPicker = true
+
+                            if entryType == .expense {
+                                HStack(spacing: 8) {
+                                    SelectionRow(
+                                        title: includesTransferToWallet ? "From Wallet" : "Wallet",
+                                        iconName: selectedWallet?.icon,
+                                        iconColorHex: selectedWallet?.colorHex,
+                                        valueName: selectedWallet?.name
+                                    ) {
+                                        showingSourceWalletPicker = true
+                                    }
+                                    transferToggleButton
+                                }
+
+                                if includesTransferToWallet {
+                                    SelectionRow(
+                                        title: "To Wallet",
+                                        iconName: destinationWallet?.icon,
+                                        iconColorHex: destinationWallet?.colorHex,
+                                        valueName: destinationWallet?.name
+                                    ) {
+                                        showingDestinationWalletPicker = true
+                                    }
+                                }
+                            } else {
+                                SelectionRow(
+                                    title: "Wallet",
+                                    iconName: selectedWallet?.icon,
+                                    iconColorHex: selectedWallet?.colorHex,
+                                    valueName: selectedWallet?.name
+                                ) {
+                                    showingSourceWalletPicker = true
+                                }
                             }
                         }
                     }
@@ -123,6 +157,26 @@ struct AddTransactionView: View {
                             .tint(.emerald)
                     }
                     .listRowBackground(Color.white.opacity(0.05))
+
+                    if let event = entry?.sharedSettlement?.event {
+                        Section {
+                            Button {
+                                showingSharedEvent = true
+                            } label: {
+                                HStack {
+                                    Label("From Shared Expense", systemImage: "person.2.fill")
+                                        .foregroundStyle(.white)
+                                    Spacer()
+                                    Text(event.title)
+                                        .foregroundStyle(.white.opacity(0.6))
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundStyle(.white.opacity(0.3))
+                                }
+                            }
+                        }
+                        .listRowBackground(Color.white.opacity(0.05))
+                    }
                 }
                 .scrollContentBackground(.hidden)
             }
@@ -144,8 +198,11 @@ struct AddTransactionView: View {
         .preferredColorScheme(.dark)
         .onAppear(perform: loadInitialState)
         .onChange(of: entryType) { _, newValue in
-            // Expense/income draw from disjoint category lists, and transfers have none at all.
-            selectedCategory = nil
+            // Expense/income draw from disjoint category lists, and transfers have none at
+            // all. For a new entry (not editing), re-apply that type's default category
+            // instead of always going blank.
+            selectedCategory = entry == nil ? defaultCategory(for: newValue) : nil
+            includesTransferToWallet = false
             if newValue != .transfer {
                 destinationWallet = nil
             }
@@ -162,6 +219,14 @@ struct AddTransactionView: View {
         .sheet(isPresented: $showingDatePicker) {
             DatePickerSheet(date: $date)
         }
+        .sheet(isPresented: $showingSharedEvent) {
+            if let event = entry?.sharedSettlement?.event {
+                NavigationStack {
+                    SharedEventDetailView(event: event)
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
         .task(id: note) {
             guard entryType != .transfer else { return }
             guard !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -172,10 +237,33 @@ struct AddTransactionView: View {
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
 
-            if let suggestion = await CategorizationService.suggestCategory(for: note) {
+            if let suggestion = await CategorizationService.suggestCategory(for: note, isIncome: entryType == .income) {
                 selectedCategory = suggestion
             }
         }
+    }
+
+    /// Toggles whether this expense also moves its amount into a second wallet — tapping it
+    /// on reveals the "To Wallet" row below; tapping it off clears that destination again.
+    private var transferToggleButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                includesTransferToWallet.toggle()
+                if !includesTransferToWallet {
+                    destinationWallet = nil
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.left.arrow.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(includesTransferToWallet ? .black : .white.opacity(0.6))
+                .frame(width: 26, height: 26)
+                .background(
+                    includesTransferToWallet ? AnyShapeStyle(Color.emerald) : AnyShapeStyle(Color.white.opacity(0.08)),
+                    in: Circle()
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var amountField: some View {
@@ -190,7 +278,7 @@ struct AddTransactionView: View {
                 .fixedSize()
                 .focused($amountFieldFocused)
                 .onChange(of: amountText) { _, newValue in
-                    let filtered = newValue.filter { $0.isNumber || $0 == "." }
+                    let filtered = newValue.sanitizedDecimalInput()
                     if filtered != newValue {
                         amountText = filtered
                     }
@@ -245,14 +333,19 @@ struct AddTransactionView: View {
     }
 
     private var amountValue: Decimal? {
-        guard let value = Decimal(string: amountText), value > 0 else { return nil }
+        guard let value = Decimal(decimalInput: amountText), value > 0 else { return nil }
         return value
     }
 
     private var isValid: Bool {
         guard amountValue != nil, let selectedWallet else { return false }
         switch entryType {
-        case .expense, .income:
+        case .expense:
+            guard selectedCategory != nil else { return false }
+            guard includesTransferToWallet else { return true }
+            guard let destinationWallet else { return false }
+            return destinationWallet !== selectedWallet
+        case .income:
             return selectedCategory != nil
         case .transfer:
             guard let destinationWallet else { return false }
@@ -260,16 +353,28 @@ struct AddTransactionView: View {
         }
     }
 
+    /// Whether this entry should carry a `destinationWallet` on save — true for a plain
+    /// transfer, or an expense with the "also moves to another wallet" toggle on.
+    private var savesDestinationWallet: Bool {
+        entryType == .transfer || (entryType == .expense && includesTransferToWallet)
+    }
+
     private func loadInitialState() {
         guard !hasLoaded else { return }
         hasLoaded = true
 
         if let entry {
-            amountText = "\(entry.amount)"
+            // `"\(entry.amount)"` would always use "." regardless of locale, which the
+            // amount field's `.onChange` sanitizer then strips because it only recognizes the
+            // current locale's decimal separator — silently collapsing e.g. "8.1" into "81"
+            // for a locale (like Spanish) that uses "," instead. `editableText()` formats with
+            // the locale's actual separator so the sanitizer round-trips it correctly.
+            amountText = entry.amount.editableText()
             entryType = entry.type
             selectedCategory = entry.category
             selectedWallet = entry.wallet
             destinationWallet = entry.destinationWallet
+            includesTransferToWallet = entry.type == .expense && entry.destinationWallet != nil
             note = entry.note
             noteAtLoad = entry.note
             date = entry.date
@@ -279,8 +384,23 @@ struct AddTransactionView: View {
             selectedWallet = initialWallet ?? wallets.first(where: \.isDefault) ?? wallets.first
             entryType = initialType
             date = initialDate
+            selectedCategory = defaultCategory(for: initialType)
             amountFieldFocused = true
         }
+    }
+
+    /// The category set as the default for `type` in Settings, if it still exists and matches
+    /// (a category renamed/archived/deleted since being set as default just falls back to nil,
+    /// same as if no default were configured).
+    private func defaultCategory(for type: EntryType) -> Category? {
+        let name: String?
+        switch type {
+        case .expense: name = preferences.defaultExpenseCategoryName
+        case .income: name = preferences.defaultIncomeCategoryName
+        case .transfer: name = nil
+        }
+        guard let name else { return nil }
+        return allCategories.first { $0.name == name && $0.isIncome == (type == .income) && !$0.isArchived }
     }
 
     private func save() {
@@ -293,7 +413,7 @@ struct AddTransactionView: View {
             entry.type = entryType
             entry.category = entryType == .transfer ? nil : selectedCategory
             entry.wallet = selectedWallet
-            entry.destinationWallet = entryType == .transfer ? destinationWallet : nil
+            entry.destinationWallet = savesDestinationWallet ? destinationWallet : nil
             entry.recurrence = recurrence
             entry.excludeFromBudget = excludeFromBudget
         } else {
@@ -304,7 +424,7 @@ struct AddTransactionView: View {
                 type: entryType,
                 category: entryType == .transfer ? nil : selectedCategory,
                 wallet: selectedWallet,
-                destinationWallet: entryType == .transfer ? destinationWallet : nil,
+                destinationWallet: savesDestinationWallet ? destinationWallet : nil,
                 recurrence: recurrence,
                 excludeFromBudget: excludeFromBudget
             )

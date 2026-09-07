@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 extension Color {
     static let appBackground = Color(red: 0.039, green: 0.039, blue: 0.047)
@@ -26,6 +27,19 @@ extension Color {
             red: Double((hexValue & 0xFF0000) >> 16) / 255,
             green: Double((hexValue & 0x00FF00) >> 8) / 255,
             blue: Double(hexValue & 0x0000FF) / 255
+        )
+    }
+
+    /// The reverse of `init(hex:)`, for round-tripping a `ColorPicker` selection back into
+    /// storage as "#RRGGBB".
+    var hexString: String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return String(
+            format: "#%02X%02X%02X",
+            Int((r * 255).rounded()),
+            Int((g * 255).rounded()),
+            Int((b * 255).rounded())
         )
     }
 }
@@ -60,6 +74,52 @@ extension Decimal {
     var doubleValue: Double { (self as NSDecimalNumber).doubleValue }
 
     var currencyFormatted: String {
-        formatted(.currency(code: Locale.current.currency?.identifier ?? "USD"))
+        let store = AppPreferencesStore.shared
+        let base = Decimal.FormatStyle.Currency.currency(code: store.currency.rawValue)
+        return formatted(store.showDoubleDecimals ? base.precision(.fractionLength(2)) : base)
+    }
+
+    /// Same as `currencyFormatted` but additionally respects "Round decimals in summaries" —
+    /// use this for headline totals (Income/Expenses/Left, Net Worth, wallet-type sums), not
+    /// itemized transaction amounts, which should always keep their real precision.
+    var currencyFormattedSummary: String {
+        let store = AppPreferencesStore.shared
+        guard store.roundDecimalsInSummaries else { return currencyFormatted }
+        return formatted(.currency(code: store.currency.rawValue).precision(.fractionLength(0)))
+    }
+
+    /// Plain numeric string (no currency symbol/grouping) for editing in a `.decimalPad` field,
+    /// using the current locale's decimal separator so it matches what typing produces.
+    func editableText(locale: Locale = .current) -> String {
+        guard self != 0 else { return "" }
+        let separator = locale.decimalSeparator ?? "."
+        return "\(self)".replacingOccurrences(of: ".", with: separator)
+    }
+
+    /// Parses text typed on a `.decimalPad`, which emits the locale's decimal separator
+    /// (e.g. "," in many European locales) rather than always ".".
+    init?(decimalInput text: String, locale: Locale = .current) {
+        self.init(string: text, locale: locale)
+    }
+}
+
+extension String {
+    /// Keeps only digits and the current locale's decimal separator, dropping any characters
+    /// typed after a second separator so only the first one survives. When `allowNegative` is
+    /// true, a leading "-" is preserved (and any other "-" characters are stripped).
+    func sanitizedDecimalInput(locale: Locale = .current, allowNegative: Bool = false) -> String {
+        let separator = locale.decimalSeparator ?? "."
+        let isNegative = allowNegative && first == "-"
+        var seenSeparator = false
+        var result = ""
+        for character in self {
+            if character.isNumber {
+                result.append(character)
+            } else if String(character) == separator, !seenSeparator {
+                seenSeparator = true
+                result.append(character)
+            }
+        }
+        return isNegative ? "-" + result : result
     }
 }

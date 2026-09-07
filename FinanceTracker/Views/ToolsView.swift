@@ -69,23 +69,31 @@ private struct ToolCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: item.icon)
-                .font(.title2)
-                .foregroundStyle(item.isAvailable ? AnyShapeStyle(LinearGradient.emeraldSky) : AnyShapeStyle(Color.white.opacity(0.3)))
+            ZStack {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white.opacity(item.isAvailable ? 0.08 : 0.05))
+                Image(systemName: item.icon)
+                    .font(.title2)
+                    .foregroundStyle(item.isAvailable ? AnyShapeStyle(LinearGradient.emeraldSky) : AnyShapeStyle(Color.white.opacity(0.3)))
+            }
+            .frame(width: 48, height: 48)
 
-            Spacer(minLength: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
 
-            Text(item.title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-
-            Text(item.isAvailable ? " " : "Coming soon")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.4))
+                if !item.isAvailable {
+                    Text("Coming soon")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .frame(height: 120)
+        // `.leading` centers vertically by default (it's leading + center), so the icon/text
+        // block sits centered in the card's height instead of pinned to the top edge.
+        .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))
     }
 }

@@ -6,6 +6,7 @@ struct EntryListView: View {
     var searchText: String = ""
 
     @Environment(\.modelContext) private var modelContext
+    @ObservedObject private var settings = OverviewSettingsStore.shared
     @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     @State private var editingEntry: Entry?
 
@@ -45,12 +46,14 @@ struct EntryListView: View {
             .frame(maxHeight: .infinity)
         } else {
             List {
-                Section {
-                    MonthSummaryCard(income: income, expenses: expenses)
+                if settings.showListSummary {
+                    Section {
+                        MonthSummaryCard(income: income, expenses: expenses)
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
                 }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
-                .listRowSeparator(.hidden)
 
                 ForEach(groupedByDay, id: \.day) { group in
                     Section {
@@ -153,7 +156,7 @@ private struct MonthSummaryCard: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.5))
-            Text(amount.currencyFormatted)
+            Text(amount.currencyFormattedSummary)
                 .font(.subheadline.bold())
                 .foregroundStyle(color)
                 .lineLimit(1)

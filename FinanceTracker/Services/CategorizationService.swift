@@ -11,7 +11,7 @@ enum CategorizationService {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     private static let model = "claude-opus-5"
 
-    static func suggestCategory(for note: String) async -> Category? {
+    static func suggestCategory(for note: String, isIncome: Bool = false) async -> Category? {
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedNote.isEmpty else { return nil }
         guard let apiKey else { return nil }
@@ -27,7 +27,7 @@ enum CategorizationService {
         var allCategories: [Category] = []
         for head in headCategories {
             let activeCategories = head.categories
-                .filter { !$0.isArchived }
+                .filter { !$0.isArchived && $0.isIncome == isIncome }
                 .sorted { $0.name < $1.name }
             guard !activeCategories.isEmpty else { continue }
             promptLines.append("\(head.name): \(activeCategories.map(\.name).joined(separator: ", "))")

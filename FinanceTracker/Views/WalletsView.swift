@@ -9,6 +9,7 @@ struct WalletsView: View {
     @State private var editingWallet: Wallet? // TEMP default set below for verification, revert
     @State private var showingTransfer = false
     @State private var showingArchived = false
+    @State private var showingManageWallets = false
 
     private var activeWallets: [Wallet] { allWallets.filter { !$0.isArchived } }
     private var archivedWallets: [Wallet] { allWallets.filter { $0.isArchived } }
@@ -65,6 +66,15 @@ struct WalletsView: View {
             }
             .darkScreenBackground()
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showingManageWallets = true
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .font(.title2)
+                            .foregroundStyle(LinearGradient.emeraldSky)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingTransfer = true
@@ -99,6 +109,9 @@ struct WalletsView: View {
         }
         .sheet(isPresented: $showingTransfer) {
             AddTransactionView(initialType: .transfer)
+        }
+        .sheet(isPresented: $showingManageWallets) {
+            ManageWalletsView()
         }
     }
 
@@ -169,7 +182,7 @@ private struct SummaryCard: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Text(amount.currencyFormatted)
+            Text(amount.currencyFormattedSummary)
                 .font(.system(size: 34, weight: .bold))
                 .foregroundStyle(.white)
                 .minimumScaleFactor(0.6)

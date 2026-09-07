@@ -16,6 +16,11 @@ struct EntryRow: View {
                         .foregroundStyle(.white.opacity(0.5))
                         .lineLimit(1)
                 }
+                if entry.type != .transfer, let destination = entry.destinationWallet {
+                    Text("Moved to \(destination.name)")
+                        .font(.caption2)
+                        .foregroundStyle(Color.skyBlue.opacity(0.8))
+                }
             }
 
             Spacer()

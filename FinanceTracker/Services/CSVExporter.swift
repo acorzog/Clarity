@@ -11,7 +11,7 @@ enum CSVExporter {
         for entry in entries {
             let fields = [
                 formatter.string(from: entry.date),
-                "\(entry.amount)",
+                entry.amount.currencyFormatted,
                 entry.type.rawValue,
                 entry.category?.name ?? "",
                 entry.category?.headCategory.name ?? "",

@@ -27,6 +27,10 @@ final class Entry {
     var wallet: Wallet
     var destinationWallet: Wallet?
 
+    /// Set when this transaction originated from a shared-expense settlement (see `Settlement`).
+    /// Personal transactions created any other way leave this nil.
+    var sharedSettlement: Settlement?
+
     init(
         amount: Decimal,
         date: Date = .now,

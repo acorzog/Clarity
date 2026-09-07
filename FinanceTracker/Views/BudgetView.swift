@@ -8,14 +8,21 @@ private enum BudgetSubTab: String, CaseIterable {
 }
 
 struct BudgetView: View {
+    @ObservedObject private var settings = BudgetSettingsStore.shared
     @State private var subTab: BudgetSubTab = .plan
     @State private var selectedMonth = Date.startOfMonth()
+    @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                GradientHeader(title: "Budget")
-                    .padding(.top, 8)
+                HStack(spacing: 10) {
+                    Image(systemName: settings.icon.rawValue)
+                        .font(.title2)
+                        .foregroundStyle(LinearGradient.emeraldSky)
+                    GradientHeader(title: settings.name)
+                }
+                .padding(.top, 8)
 
                 MonthSelector(month: $selectedMonth)
                     .padding(.horizontal)
@@ -41,6 +48,20 @@ struct BudgetView: View {
                 }
             }
             .darkScreenBackground()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.title2)
+                            .foregroundStyle(LinearGradient.emeraldSky)
+                    }
+                }
+            }
+            .sheet(isPresented: $showingSettings) {
+                BudgetSettingsView()
+            }
         }
     }
 }

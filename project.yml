@@ -28,6 +28,11 @@ targets:
           - CFBundleURLName: com.andreacorzo.FinanceTracker
             CFBundleURLSchemes:
               - financetracker
+        # Full UILaunchScreen dict (rather than *_Generation: YES) so the system-level launch
+        # screen is a solid dark background matching the app instead of default white — this is
+        # what's visible for the instant before LaunchScreenView (SwiftUI) takes over.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.andreacorzo.FinanceTracker
@@ -41,7 +46,6 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         INFOPLIST_KEY_CFBundleDisplayName: Clarity
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_NSFaceIDUsageDescription: "Clarity uses Face ID to keep your financial data private."
         SWIFT_EMIT_LOC_STRINGS: YES

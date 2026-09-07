@@ -7,7 +7,8 @@ enum SharedModelContainer {
     static let appGroupID = "group.com.andreacorzo.FinanceTracker"
 
     static let schema = Schema([
-        HeadCategory.self, Category.self, Wallet.self, Entry.self, Budget.self, SpendingInsight.self
+        HeadCategory.self, Category.self, Wallet.self, Entry.self, Budget.self, SpendingInsight.self,
+        Person.self, SharedEvent.self, SharedExpense.self, SharedExpenseParticipant.self, Settlement.self
     ])
 
     static func make() -> ModelContainer {

@@ -207,7 +207,7 @@ private struct PlannedAmountRow: View {
             rowContent
         }
         .onAppear {
-            text = amount == 0 ? "" : "\(amount)"
+            text = amount.editableText()
             if autoFocus {
                 focused = true
                 onAutoFocusConsumed()
@@ -215,15 +215,15 @@ private struct PlannedAmountRow: View {
         }
         .onChange(of: amount) { _, newValue in
             guard !focused else { return }
-            text = newValue == 0 ? "" : "\(newValue)"
+            text = newValue.editableText()
         }
         .onChange(of: text) { _, newValue in
-            let filtered = newValue.filter { $0.isNumber || $0 == "." }
+            let filtered = newValue.sanitizedDecimalInput()
             if filtered != newValue {
                 text = filtered
                 return
             }
-            onCommit(Decimal(string: filtered) ?? 0)
+            onCommit(Decimal(decimalInput: filtered) ?? 0)
         }
     }
 

@@ -22,6 +22,12 @@ struct LogExpenseIntent: AppIntent {
     @Parameter(title: "Category")
     var category: CategoryEntity?
 
+    /// Free-text category guess (e.g. "eating out", "dentist") asked for when `category` isn't
+    /// already set — matched against the real categories with `CategorizationService` instead of
+    /// requiring the caller to know an exact category name.
+    @Parameter(title: "What's this for?")
+    var categoryHint: String?
+
     @Parameter(title: "Wallet")
     var wallet: WalletEntity?
 
@@ -54,6 +60,22 @@ struct LogExpenseIntent: AppIntent {
             ).first
         }
 
+        // No explicit category was passed in (the common case when this runs from Siri/the
+        // Action Button) — ask for a free-text guess and match it to a real category instead of
+        // making the caller pick an exact name from a list. This step is best-effort: if the
+        // prompt can't be completed (cancelled, dismissed, or unavailable in a background/NFC
+        // automation that isn't fully interactive), `try?` swallows the error so the expense
+        // still gets logged with no category rather than silently failing to save at all.
+        if resolvedCategory == nil,
+           let hint = try? await $categoryHint.requestValue("What's this for? (e.g. restaurant, groceries, dentist)"),
+           !hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            CategorizationService.modelContext = context
+            resolvedCategory = await CategorizationService.suggestCategory(for: hint)
+            if note == nil || note?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+                note = hint
+            }
+        }
+
         let entry = Entry(
             amount: Decimal(amount),
             note: note ?? "",
@@ -66,6 +88,7 @@ struct LogExpenseIntent: AppIntent {
         WidgetCenter.shared.reloadAllTimelines()
 
         let noteSuffix = note.map { " for \($0)" } ?? ""
-        return .result(dialog: "Logged \(Decimal(amount).currencyFormatted)\(noteSuffix) in Clarity.")
+        let categorySuffix = resolvedCategory.map { " under \($0.name)" } ?? ""
+        return .result(dialog: "Logged \(Decimal(amount).currencyFormatted)\(noteSuffix)\(categorySuffix) in Clarity.")
     }
 }

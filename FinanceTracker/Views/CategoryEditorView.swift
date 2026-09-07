@@ -6,44 +6,6 @@ private enum IconMode: String, CaseIterable {
     case emoji = "Emoji"
 }
 
-private struct IconGroup {
-    let title: String
-    let icons: [String]
-}
-
-private let iconGroups: [IconGroup] = [
-    IconGroup(title: "Shopping", icons: [
-        "cart.fill", "bag.fill", "basket.fill", "tag.fill", "gift.fill", "shippingbox.fill"
-    ]),
-    IconGroup(title: "Food & Drink", icons: [
-        "fork.knife", "cup.and.saucer.fill", "wineglass.fill", "birthday.cake.fill",
-        "takeoutbag.and.cup.and.straw.fill", "mug.fill"
-    ]),
-    IconGroup(title: "Transport", icons: [
-        "car.fill", "bus.fill", "tram.fill", "bicycle", "fuelpump.fill", "parkingsign.circle.fill"
-    ]),
-    IconGroup(title: "Health", icons: [
-        "cross.case.fill", "heart.fill", "pills.fill", "figure.walk", "bandage.fill", "waveform.path.ecg"
-    ]),
-    IconGroup(title: "Home & Utilities", icons: [
-        "house.fill", "bolt.fill", "wifi", "wrench.and.screwdriver.fill", "lightbulb.fill", "flame.fill"
-    ]),
-    IconGroup(title: "Entertainment", icons: [
-        "gamecontroller.fill", "film.fill", "music.note", "ticket.fill", "tv.fill", "headphones"
-    ]),
-    IconGroup(title: "Finance", icons: [
-        "banknote.fill", "creditcard.fill", "chart.line.uptrend.xyaxis", "dollarsign.circle.fill",
-        "building.columns.fill", "chart.pie.fill"
-    ]),
-    IconGroup(title: "Travel", icons: [
-        "airplane", "suitcase.fill", "map.fill", "globe", "beach.umbrella.fill", "camera.fill"
-    ]),
-    IconGroup(title: "Family & Pets", icons: [
-        "pawprint.fill", "person.2.fill", "person.3.fill", "figure.and.child.holdinghands",
-        "dog.fill", "cat.fill"
-    ])
-]
-
 /// Always sheet-presented (from CategoriesView or PlanView's income "Add Category"
 /// row), wrapped in its own NavigationStack by the caller — `showsCancelButton`
 /// controls whether a Cancel button appears alongside Save.
@@ -52,6 +14,10 @@ struct CategoryEditorView: View {
     var defaultHeadCategory: HeadCategory?
     var defaultIsIncome = false
     var showsCancelButton = false
+    /// Called with the created/edited category right before this view dismisses itself — lets
+    /// a caller like `CategoryPickerView` auto-select a category created inline instead of
+    /// requiring a second tap to find and pick it after the sheet closes.
+    var onSave: ((Category) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -61,8 +27,11 @@ struct CategoryEditorView: View {
     @State private var selectedHeadCategory: HeadCategory?
     @State private var iconMode: IconMode = .icon
     @State private var selectedIcon = "cart.fill"
-    @State private var selectedIconGroup = iconGroups[0].title
+    @State private var selectedIconGroup = IconCatalog.groups[0].title
+    @State private var iconSearchText = ""
     @State private var emojiText = ""
+    @State private var selectedEmojiGroup = EmojiCatalog.groups[0].title
+    @State private var emojiSearchText = ""
     @State private var selectedColorHex: String?
     @State private var isSavings = false
     @State private var hasLoaded = false
@@ -81,7 +50,11 @@ struct CategoryEditorView: View {
     }
 
     private var currentGroupIcons: [String] {
-        iconGroups.first { $0.title == selectedIconGroup }?.icons ?? []
+        IconCatalog.groups.first { $0.title == selectedIconGroup }?.icons ?? []
+    }
+
+    private var currentGroupEmoji: [String] {
+        EmojiCatalog.groups.first { $0.title == selectedEmojiGroup }?.emoji ?? []
     }
 
     var body: some View {
@@ -120,57 +93,184 @@ struct CategoryEditorView: View {
                 .padding(.vertical, 4)
 
                 if iconMode == .icon {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(iconGroups, id: \.title) { group in
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.white.opacity(0.4))
+                        TextField("Search icons (e.g. \"coffee\")", text: $iconSearchText)
+                            .foregroundStyle(.white)
+                        if !iconSearchText.isEmpty {
+                            Button {
+                                iconSearchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.white.opacity(0.4))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.vertical, 4)
+
+                    if iconSearchText.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(IconCatalog.groups, id: \.title) { group in
+                                    Button {
+                                        selectedIconGroup = group.title
+                                    } label: {
+                                        Text(group.title)
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                selectedIconGroup == group.title ? previewColor : Color.white.opacity(0.08),
+                                                in: Capsule()
+                                            )
+                                            .foregroundStyle(selectedIconGroup == group.title ? .black : .white)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
+                            ForEach(currentGroupIcons, id: \.self) { candidate in
                                 Button {
-                                    selectedIconGroup = group.title
+                                    selectedIcon = candidate
                                 } label: {
-                                    Text(group.title)
-                                        .font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
+                                    Image(systemName: candidate)
+                                        .font(.title3)
+                                        .foregroundStyle(selectedIcon == candidate ? .black : .white)
+                                        .frame(width: 38, height: 38)
                                         .background(
-                                            selectedIconGroup == group.title ? previewColor : Color.white.opacity(0.08),
-                                            in: Capsule()
+                                            selectedIcon == candidate ? previewColor : Color.white.opacity(0.08),
+                                            in: Circle()
                                         )
-                                        .foregroundStyle(selectedIconGroup == group.title ? .black : .white)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
                         .padding(.vertical, 4)
+                    } else {
+                        let results = IconCatalog.search(iconSearchText)
+                        if results.isEmpty {
+                            Text("No icons match “\(iconSearchText)”.")
+                                .foregroundStyle(.white.opacity(0.4))
+                                .padding(.vertical, 8)
+                        } else {
+                            // Search results are usually a handful of icons rather than a full
+                            // group, so show them larger than the browse grid — no need to
+                            // conserve space the way the 6-column group grid does.
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 14) {
+                                ForEach(results) { def in
+                                    Button {
+                                        selectedIcon = def.symbolName
+                                    } label: {
+                                        Image(systemName: def.symbolName)
+                                            .font(.title)
+                                            .foregroundStyle(selectedIcon == def.symbolName ? .black : .white)
+                                            .frame(width: 52, height: 52)
+                                            .background(
+                                                selectedIcon == def.symbolName ? previewColor : Color.white.opacity(0.08),
+                                                in: Circle()
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
                     }
-
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
-                        ForEach(currentGroupIcons, id: \.self) { candidate in
+                } else {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.white.opacity(0.4))
+                        TextField("Search emoji (e.g. \"party\")", text: $emojiSearchText)
+                            .foregroundStyle(.white)
+                        if !emojiSearchText.isEmpty {
                             Button {
-                                selectedIcon = candidate
+                                emojiSearchText = ""
                             } label: {
-                                Image(systemName: candidate)
-                                    .font(.title3)
-                                    .foregroundStyle(selectedIcon == candidate ? .black : .white)
-                                    .frame(width: 38, height: 38)
-                                    .background(
-                                        selectedIcon == candidate ? previewColor : Color.white.opacity(0.08),
-                                        in: Circle()
-                                    )
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.white.opacity(0.4))
                             }
                             .buttonStyle(.plain)
                         }
                     }
+                    .padding(10)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
                     .padding(.vertical, 4)
-                } else {
-                    TextField("Tap to pick an emoji", text: $emojiText)
-                        .font(.system(size: 32))
-                        .multilineTextAlignment(.center)
-                        .onChange(of: emojiText) { _, newValue in
-                            if let last = newValue.last {
-                                emojiText = String(last)
+
+                    if emojiSearchText.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(EmojiCatalog.groups, id: \.title) { group in
+                                    Button {
+                                        selectedEmojiGroup = group.title
+                                    } label: {
+                                        Text(group.title)
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                selectedEmojiGroup == group.title ? previewColor : Color.white.opacity(0.08),
+                                                in: Capsule()
+                                            )
+                                            .foregroundStyle(selectedEmojiGroup == group.title ? .black : .white)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
+                            ForEach(currentGroupEmoji, id: \.self) { candidate in
+                                Button {
+                                    emojiText = candidate
+                                } label: {
+                                    Text(candidate)
+                                        .font(.title2)
+                                        .frame(width: 38, height: 38)
+                                        .background(
+                                            emojiText == candidate ? previewColor : Color.white.opacity(0.08),
+                                            in: Circle()
+                                        )
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 4)
+                    } else {
+                        let results = EmojiCatalog.search(emojiSearchText)
+                        if results.isEmpty {
+                            Text("No emoji match “\(emojiSearchText)”.")
+                                .foregroundStyle(.white.opacity(0.4))
+                                .padding(.vertical, 8)
+                        } else {
+                            // Same reasoning as the icon search grid above: fewer results, so
+                            // give them more room than the browse-by-group grid does.
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 14) {
+                                ForEach(results) { def in
+                                    Button {
+                                        emojiText = def.emoji
+                                    } label: {
+                                        Text(def.emoji)
+                                            .font(.title)
+                                            .frame(width: 52, height: 52)
+                                            .background(
+                                                emojiText == def.emoji ? previewColor : Color.white.opacity(0.08),
+                                                in: Circle()
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
                 }
 
                 colorSwatchRow
@@ -209,24 +309,39 @@ struct CategoryEditorView: View {
     }
 
     private var colorSwatchRow: some View {
-        HStack(spacing: 10) {
-            ForEach(colorChoices, id: \.self) { hex in
-                Button {
-                    selectedColorHex = hex
-                } label: {
-                    Circle()
-                        .fill(Color(hex: hex))
-                        .frame(width: 28, height: 28)
-                        .overlay {
-                            if selectedColorHex == hex {
-                                Circle().stroke(Color.white, lineWidth: 2)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(colorChoices, id: \.self) { hex in
+                    Button {
+                        selectedColorHex = hex
+                    } label: {
+                        Circle()
+                            .fill(Color(hex: hex))
+                            .frame(width: 28, height: 28)
+                            .overlay {
+                                if selectedColorHex == hex {
+                                    Circle().stroke(Color.white, lineWidth: 2)
+                                }
                             }
-                        }
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+
+                ColorPicker("Custom color", selection: customColorBinding, supportsOpacity: false)
+                    .labelsHidden()
+                    .frame(width: 28, height: 28)
             }
+            .padding(.vertical, 4)
         }
-        .padding(.vertical, 4)
+    }
+
+    /// Bridges the swatch model's `#RRGGBB` storage to `ColorPicker`'s `Color`, so a shade
+    /// outside the 12 presets can still be picked and round-trips back to hex on save.
+    private var customColorBinding: Binding<Color> {
+        Binding(
+            get: { previewColor },
+            set: { selectedColorHex = $0.hexString }
+        )
     }
 
     private var isValid: Bool {
@@ -243,9 +358,12 @@ struct CategoryEditorView: View {
             iconMode = category.iconIsEmoji ? .emoji : .icon
             if category.iconIsEmoji {
                 emojiText = category.customIcon ?? ""
+                if let group = EmojiCatalog.groups.first(where: { $0.emoji.contains(emojiText) }) {
+                    selectedEmojiGroup = group.title
+                }
             } else if let icon = category.customIcon {
                 selectedIcon = icon
-                if let group = iconGroups.first(where: { $0.icons.contains(icon) }) {
+                if let group = IconCatalog.groups.first(where: { $0.icons.contains(icon) }) {
                     selectedIconGroup = group.title
                 }
             }
@@ -277,6 +395,7 @@ struct CategoryEditorView: View {
             category.iconIsEmoji = usesEmoji
             category.customColorHex = selectedColorHex
             category.isSavings = isSavings
+            onSave?(category)
         } else {
             let newCategory = Category(
                 name: trimmedName,
@@ -288,6 +407,7 @@ struct CategoryEditorView: View {
                 headCategory: head
             )
             modelContext.insert(newCategory)
+            onSave?(newCategory)
         }
         dismiss()
     }

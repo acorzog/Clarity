@@ -101,24 +101,34 @@ struct WalletEditorView: View {
                 }
                 .padding(.vertical, 4)
 
-                HStack(spacing: 10) {
-                    ForEach(colorChoices, id: \.self) { hex in
-                        Button {
-                            colorHex = hex
-                        } label: {
-                            Circle()
-                                .fill(Color(hex: hex))
-                                .frame(width: 28, height: 28)
-                                .overlay {
-                                    if colorHex == hex {
-                                        Circle().stroke(Color.white, lineWidth: 2)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(colorChoices, id: \.self) { hex in
+                            Button {
+                                colorHex = hex
+                            } label: {
+                                Circle()
+                                    .fill(Color(hex: hex))
+                                    .frame(width: 28, height: 28)
+                                    .overlay {
+                                        if colorHex == hex {
+                                            Circle().stroke(Color.white, lineWidth: 2)
+                                        }
                                     }
-                                }
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+
+                        ColorPicker(
+                            "Custom color",
+                            selection: Binding(get: { Color(hex: colorHex) }, set: { colorHex = $0.hexString }),
+                            supportsOpacity: false
+                        )
+                        .labelsHidden()
+                        .frame(width: 28, height: 28)
                     }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
             }
             .listRowBackground(Color.white.opacity(0.05))
 
@@ -143,10 +153,7 @@ struct WalletEditorView: View {
                         .foregroundStyle(currentBalanceText.hasPrefix("-") ? Color.expenseRed : .white)
                         .frame(width: 100)
                         .onChange(of: currentBalanceText) { _, newValue in
-                            var filtered = newValue.filter { $0.isNumber || $0 == "." || $0 == "-" }
-                            let isNegative = filtered.first == "-"
-                            filtered.removeAll { $0 == "-" }
-                            if isNegative { filtered = "-" + filtered }
+                            let filtered = newValue.sanitizedDecimalInput(allowNegative: true)
                             if filtered != newValue { currentBalanceText = filtered }
                         }
                 }
@@ -285,7 +292,7 @@ struct WalletEditorView: View {
             type = wallet.type
             colorHex = wallet.colorHex
             icon = wallet.icon
-            currentBalanceText = "\(wallet.balance)"
+            currentBalanceText = wallet.balance.editableText()
             includeInNetWorth = wallet.includeInNetWorth
             isDefault = wallet.isDefault
         }
@@ -303,13 +310,24 @@ struct WalletEditorView: View {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else { return }
 
-        let desiredBalance = Decimal(string: currentBalanceText) ?? 0
+        let desiredBalance = Decimal(decimalInput: currentBalanceText) ?? 0
 
         if let wallet {
-            // Reverse-derive startingBalance so the computed `balance` matches what was typed,
-            // without touching the effect every existing entry already has on it.
-            let entriesEffect = wallet.balance - wallet.startingBalance
-            wallet.startingBalance = desiredBalance - entriesEffect
+            // Log the difference as a real entry rather than silently reverse-deriving
+            // startingBalance to match — a manual balance correction should show up in the
+            // wallet's transaction history like anything else that moves its balance, not
+            // disappear into an invisible starting-balance adjustment.
+            let delta = desiredBalance - wallet.balance
+            if delta != 0 {
+                let adjustment = Entry(
+                    amount: abs(delta),
+                    note: "Balance adjustment",
+                    type: delta > 0 ? .income : .expense,
+                    wallet: wallet,
+                    excludeFromBudget: true
+                )
+                modelContext.insert(adjustment)
+            }
             wallet.name = trimmedName
             wallet.type = type
             wallet.colorHex = colorHex

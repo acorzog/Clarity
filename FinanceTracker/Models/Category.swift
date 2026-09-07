@@ -45,3 +45,11 @@ final class Category {
     /// The category's own color if set, otherwise its HeadCategory's color.
     var resolvedColorHex: String { customColorHex ?? headCategory.colorHex }
 }
+
+extension Category {
+    /// The existing "Reimburse" income category, if present — used to pre-select a sensible
+    /// default for incoming shared-expense settlements without ever creating a new category.
+    static func reimburse(in categories: [Category]) -> Category? {
+        categories.first { $0.name == "Reimburse" && $0.isIncome && !$0.isArchived }
+    }
+}

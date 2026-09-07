@@ -5,6 +5,7 @@ import Charts
 struct OverviewSummaryView: View {
     let month: Date
 
+    @ObservedObject private var settings = OverviewSettingsStore.shared
     @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
 
     private var monthEntries: [Entry] { allEntries.inMonth(month) }
@@ -41,13 +42,26 @@ struct OverviewSummaryView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            SpendingInsightsCardView(month: month)
-            SummaryCard(income: income, expenses: expenses)
-            InsightsSummaryCard(trend: trend, topCategories: topCategories)
-            CalendarCard(month: month)
+            ForEach(settings.visibleCards) { card in
+                cardView(for: card)
+            }
         }
         .padding(.horizontal)
         .padding(.bottom, 24)
+    }
+
+    @ViewBuilder
+    private func cardView(for card: OverviewCard) -> some View {
+        switch card {
+        case .insights:
+            SpendingInsightsCardView(month: month)
+        case .summary:
+            SummaryCard(income: income, expenses: expenses)
+        case .trends:
+            InsightsSummaryCard(trend: trend, topCategories: topCategories)
+        case .calendar:
+            CalendarCard(month: month)
+        }
     }
 }
 
@@ -185,7 +199,7 @@ private struct StatColumn: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.5))
-            Text(amount.currencyFormatted)
+            Text(amount.currencyFormattedSummary)
                 .font(.subheadline.bold())
                 .foregroundStyle(color)
                 .lineLimit(1)

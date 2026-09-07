@@ -10,7 +10,17 @@ struct WalletTransactionRow: View {
 
     private var effect: Decimal { wallet.effect(of: entry) }
 
+    /// True when this wallet is only receiving an expense's money (the "also moves to another
+    /// wallet" option), not the wallet the expense was actually categorized against — shown
+    /// like an incoming transfer rather than as if this wallet earned a category-tagged amount.
+    private var isIncomingFromNonTransferEntry: Bool {
+        entry.type != .transfer && entry.destinationWallet === wallet
+    }
+
     private var title: String {
+        if isIncomingFromNonTransferEntry {
+            return "From \(entry.wallet.name)"
+        }
         switch entry.type {
         case .expense, .income:
             return entry.category?.name ?? "Uncategorized"
@@ -54,7 +64,7 @@ struct WalletTransactionRow: View {
 
     @ViewBuilder
     private var leadingIcon: some View {
-        if entry.type != .transfer, let category = entry.category {
+        if entry.type != .transfer, !isIncomingFromNonTransferEntry, let category = entry.category {
             CategoryIconView(category: category, size: 34)
         } else {
             Image(systemName: "arrow.left.arrow.right")

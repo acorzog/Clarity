@@ -15,7 +15,7 @@ struct AutomationsHelpView: View {
                     ActionSummaryRow(
                         icon: "plus.circle.fill",
                         title: "New Transaction",
-                        detail: "Logs an expense with an amount, note, category, and wallet you provide. Works from Siri, the Shortcuts app, an Automation, or the Action Button — Clarity doesn't need to be open."
+                        detail: "Logs an expense with an amount and wallet you provide. If you don't pick an exact category, it asks what the expense was for (e.g. \"restaurant\" or \"dentist\") and matches it to the closest real category. Works from Siri, the Shortcuts app, an Automation, or the Action Button — Clarity doesn't need to be open."
                     )
                     ActionSummaryRow(
                         icon: "text.bubble.fill",

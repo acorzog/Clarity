@@ -12,6 +12,9 @@ struct MainTabView: View {
             WalletsView()
                 .tabItem { Label("Wallets", systemImage: "wallet.pass.fill") }
 
+            SharedHomeView()
+                .tabItem { Label("Shared", systemImage: "person.2.fill") }
+
             ToolsView()
                 .tabItem { Label("Tools", systemImage: "wrench.and.screwdriver.fill") }
         }

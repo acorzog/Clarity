@@ -4,12 +4,21 @@ import SwiftData
 struct RemainingView: View {
     let month: Date
 
+    @ObservedObject private var settings = BudgetSettingsStore.shared
     @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     @Query private var allBudgets: [Budget]
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
 
+    private var periodEntries: [Entry] {
+        allEntries.inBudgetPeriod(month, startDay: settings.cycleStartDay)
+    }
+
     private var monthExpenses: [Entry] {
-        allEntries.inMonth(month).filter { $0.type == .expense }
+        periodEntries.filter { $0.type == .expense }
+    }
+
+    private var monthTransfers: [Entry] {
+        periodEntries.filter { $0.type == .transfer }
     }
 
     private func entries(for category: Category) -> [Entry] {
@@ -44,18 +53,67 @@ struct RemainingView: View {
     }
 
     private var totalIncome: Decimal {
-        allEntries.inMonth(month).filter { $0.type == .income }.reduce(Decimal(0)) { $0 + $1.amount }
+        periodEntries.filter { $0.type == .income }.reduce(Decimal(0)) { $0 + $1.amount }
     }
 
-    private var totalSpent: Decimal { monthExpenses.reduce(Decimal(0)) { $0 + $1.amount } }
+    /// Expenses whose category has no monthly limit set (or no category at all) — folded into
+    /// an "Other Expenses" bucket when `settings.includeUnplannedAsOtherExpenses` is on.
+    private var otherExpenses: [Entry] {
+        monthExpenses.filter { entry in
+            guard let category = entry.category else { return true }
+            return budgeted(for: category) == 0
+        }
+    }
 
-    /// What "Left to Spend" is measured against. Income actually received this month is real
+    private var otherExpensesTotal: Decimal {
+        otherExpenses.reduce(Decimal(0)) { $0 + $1.amount }
+    }
+
+    private var savingsTransfersTotal: Decimal {
+        monthTransfers.filter { $0.destinationWallet?.type == .savings }.reduce(Decimal(0)) { $0 + $1.amount }
+    }
+
+    private var debtTransfersTotal: Decimal {
+        monthTransfers.filter { $0.destinationWallet?.type == .debt }.reduce(Decimal(0)) { $0 + $1.amount }
+    }
+
+    private var otherRows: [OtherSpendingRow] {
+        var rows: [OtherSpendingRow] = []
+        if settings.includeUnplannedAsOtherExpenses && otherExpensesTotal > 0 {
+            rows.append(OtherSpendingRow(title: "Other Expenses", amount: otherExpensesTotal, icon: "questionmark.circle.fill"))
+        }
+        if settings.includeSavingsTransfers && savingsTransfersTotal > 0 {
+            rows.append(OtherSpendingRow(title: "Savings Transfers", amount: savingsTransfersTotal, icon: "banknote.fill"))
+        }
+        if settings.includeDebtTransfers && debtTransfersTotal > 0 {
+            rows.append(OtherSpendingRow(title: "Debt Payments", amount: debtTransfersTotal, icon: "creditcard.fill"))
+        }
+        return rows
+    }
+
+    private var totalSpent: Decimal {
+        var total = monthExpenses.reduce(Decimal(0)) { $0 + $1.amount }
+        if !settings.includeUnplannedAsOtherExpenses {
+            total -= otherExpensesTotal
+        }
+        if settings.includeSavingsTransfers {
+            total += savingsTransfersTotal
+        }
+        if settings.includeDebtTransfers {
+            total += debtTransfersTotal
+        }
+        return total
+    }
+
+    /// What "Left to Spend" is measured against. A manual monthly budget goal (set in Budget
+    /// Settings) takes priority when set; otherwise income actually received this period is real
     /// money available to spend, so it takes priority over the expense-category budget total —
     /// otherwise a wallet full of income shows as unavailable just because it wasn't assigned to
-    /// a specific expense category. Falls back to the budgeted total for months with no income
+    /// a specific expense category. Falls back to the budgeted total for periods with no income
     /// tracked at all, so pure budget-only users see the same behavior as before.
     private var totalAvailable: Decimal {
-        totalIncome > 0 ? totalIncome : totalBudgeted
+        if settings.manualMonthlyBudget > 0 { return settings.manualMonthlyBudget }
+        return totalIncome > 0 ? totalIncome : totalBudgeted
     }
 
     var body: some View {
@@ -82,10 +140,55 @@ struct RemainingView: View {
                             )
                         }
                     }
+
+                    if !otherRows.isEmpty {
+                        OtherSpendingCard(rows: otherRows)
+                    }
                 }
             }
             .padding(.horizontal)
             .padding(.bottom, 24)
+        }
+    }
+}
+
+private struct OtherSpendingRow: Identifiable {
+    var id: String { title }
+    let title: String
+    let amount: Decimal
+    let icon: String
+}
+
+private struct OtherSpendingCard: View {
+    let rows: [OtherSpendingRow]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Other")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.6))
+
+            VStack(spacing: 0) {
+                ForEach(rows) { row in
+                    HStack(spacing: 12) {
+                        Image(systemName: row.icon)
+                            .foregroundStyle(.white.opacity(0.5))
+                            .frame(width: 20)
+                        Text(row.title)
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Text(row.amount.currencyFormatted)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 12)
+
+                    if row.id != rows.last?.id {
+                        Divider().background(Color.white.opacity(0.08)).padding(.leading, 44)
+                    }
+                }
+            }
+            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
         }
     }
 }
@@ -189,6 +292,7 @@ private struct HeadRemainingSection: View {
     let categories: [Category]
     let spentFor: (Category) -> Decimal
     let budgetedFor: (Category) -> Decimal
+    let entriesFor: (Category) -> [Entry]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -207,12 +311,17 @@ private struct HeadRemainingSection: View {
 
             VStack(spacing: 0) {
                 ForEach(categories) { category in
-                    CategoryProgressRow(
-                        name: category.name,
-                        colorHex: category.resolvedColorHex,
-                        spent: spentFor(category),
-                        budgeted: budgetedFor(category)
-                    )
+                    NavigationLink {
+                        CategoryEntriesDetailView(title: category.name, entries: entriesFor(category))
+                    } label: {
+                        CategoryProgressRow(
+                            name: category.name,
+                            colorHex: category.resolvedColorHex,
+                            spent: spentFor(category),
+                            budgeted: budgetedFor(category)
+                        )
+                    }
+                    .buttonStyle(.plain)
                     if category !== categories.last {
                         Divider().background(Color.white.opacity(0.08)).padding(.leading, 60)
                     }
@@ -222,6 +331,7 @@ private struct HeadRemainingSection: View {
         }
     }
 }
+
 
 private struct CategoryProgressRow: View {
     let name: String

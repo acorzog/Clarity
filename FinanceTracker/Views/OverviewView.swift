@@ -9,6 +9,7 @@ private enum OverviewSubTab: String, CaseIterable {
 
 struct OverviewView: View {
     @State private var showingAddTransaction = false
+    @State private var showingSettings = false
     @State private var subTab: OverviewSubTab = .overview
     @State private var selectedMonth = Date.startOfMonth()
     @State private var searchText = ""
@@ -32,6 +33,12 @@ struct OverviewView: View {
                 .tint(.emerald)
                 .padding(.horizontal)
 
+                if isSearchPresented {
+                    searchField
+                        .padding(.horizontal)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
                 switch subTab {
                 case .overview:
                     ScrollView { OverviewSummaryView(month: selectedMonth) }
@@ -44,10 +51,20 @@ struct OverviewView: View {
             }
             .darkScreenBackground()
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.title2)
+                            .foregroundStyle(LinearGradient.emeraldSky)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         subTab = .list
-                        isSearchPresented = true
+                        withAnimation { isSearchPresented.toggle() }
+                        if !isSearchPresented { searchText = "" }
                     } label: {
                         Image(systemName: "magnifyingglass")
                             .font(.title2)
@@ -64,16 +81,39 @@ struct OverviewView: View {
                     }
                 }
             }
-            .searchable(
-                text: $searchText,
-                isPresented: $isSearchPresented,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Search transactions"
-            )
+            .onChange(of: subTab) { _, newValue in
+                if newValue != .list {
+                    isSearchPresented = false
+                }
+            }
+            .sheet(isPresented: $showingSettings) {
+                OverviewSettingsView()
+            }
         }
         .sheet(isPresented: $showingAddTransaction) {
             AddTransactionView()
         }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.white.opacity(0.5))
+            TextField("Search transactions", text: $searchText)
+                .foregroundStyle(.white)
+                .submitLabel(.search)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 

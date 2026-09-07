@@ -14,6 +14,7 @@ struct CategoriesView: View {
     @State private var isRemoving = false
     @State private var showingNewCategory = false
     @State private var editingCategory: Category?
+    @State private var editingHeadCategory: HeadCategory?
     @State private var headsShowingArchived: Set<PersistentIdentifier> = []
 
     private let gridColumns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
@@ -105,7 +106,8 @@ struct CategoriesView: View {
                                     onToggleArchived: { toggleArchivedVisibility(for: head) },
                                     onTapCategory: { editingCategory = $0 },
                                     onArchive: archive,
-                                    onRestore: restore
+                                    onRestore: restore,
+                                    onEditHead: { editingHeadCategory = head }
                                 )
                                 .categoryCardStyle()
                             }
@@ -149,6 +151,12 @@ struct CategoriesView: View {
             }
             .preferredColorScheme(.dark)
         }
+        .sheet(item: $editingHeadCategory) { head in
+            NavigationStack {
+                HeadCategoryEditorView(headCategory: head)
+            }
+            .preferredColorScheme(.dark)
+        }
     }
 }
 
@@ -163,13 +171,22 @@ private struct HeadCategorySection: View {
     let onTapCategory: (Category) -> Void
     let onArchive: (Category) -> Void
     let onRestore: (Category) -> Void
+    let onEditHead: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(head.name)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                Button(action: onEditHead) {
+                    HStack(spacing: 4) {
+                        Text(head.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.6))
+                        Image(systemName: "pencil")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.35))
+                    }
+                }
+                .buttonStyle(.plain)
                 Spacer()
                 if !archivedCategories.isEmpty {
                     Button(action: onToggleArchived) {
