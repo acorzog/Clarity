@@ -158,41 +158,60 @@ private struct CategorySlice: Identifiable {
 private struct DonutBreakdownCard: View {
     let slices: [CategorySlice]
 
-    /// Position within the cumulative "Amount" domain that the chart reports back on tap —
-    /// e.g. for three slices of 10/20/30, tapping the second slice reports somewhere in 10...30.
-    @State private var tappedAmount: Double?
+    /// The slice currently shown in the center label. Defaults to the largest (already first,
+    /// since `slices` is sorted descending) until the user taps a different wedge.
+    @State private var selectedSliceID: PersistentIdentifier?
 
     private var totalAmount: Double {
         slices.reduce(0) { $0 + $1.amount.doubleValue }
     }
 
-    /// The slice a tap landed in, resolved by walking the same cumulative order the chart
-    /// stacks its sectors in. Falls back to the largest slice (already first, since `slices`
-    /// is sorted descending) when nothing has been tapped yet.
     private var highlightedSlice: CategorySlice? {
-        guard let tappedAmount else { return slices.first }
-        var cumulative: Double = 0
-        for slice in slices {
-            cumulative += slice.amount.doubleValue
-            if tappedAmount <= cumulative {
-                return slice
-            }
-        }
-        return slices.last
+        slices.first { $0.id == selectedSliceID } ?? slices.first
     }
 
-    /// The angle (from 12 o'clock, clockwise) of a slice's midpoint, for placing its icon —
-    /// mirrors the cumulative order Swift Charts stacks `SectorMark`s in from `slices`.
-    private func midAngle(for slice: CategorySlice) -> Angle {
+    /// Each slice's start/end angle (from 12 o'clock, clockwise, in degrees), in the same
+    /// cumulative order Swift Charts stacks `SectorMark`s in from `slices`. Computed once per
+    /// body evaluation and reused for icon placement, icon visibility, and tap hit-testing so
+    /// all three agree on exactly the same geometry.
+    private var sliceRanges: [(slice: CategorySlice, start: Double, end: Double)] {
+        guard totalAmount > 0 else { return [] }
         var cumulative: Double = 0
-        for candidate in slices {
-            if candidate.id == slice.id {
-                let mid = cumulative + candidate.amount.doubleValue / 2
-                return .degrees(totalAmount > 0 ? mid / totalAmount * 360 - 90 : 0)
-            }
-            cumulative += candidate.amount.doubleValue
+        return slices.map { slice in
+            let start = cumulative / totalAmount * 360
+            cumulative += slice.amount.doubleValue
+            let end = cumulative / totalAmount * 360
+            return (slice, start, end)
         }
-        return .degrees(0)
+    }
+
+    private func midAngle(for slice: CategorySlice) -> Angle {
+        guard let range = sliceRanges.first(where: { $0.slice.id == slice.id }) else { return .degrees(0) }
+        return .degrees((range.start + range.end) / 2 - 90)
+    }
+
+    /// Hides the icon on wedges too narrow to fit a 22pt badge without touching its neighbor,
+    /// rather than letting adjacent icons overlap on thin slices.
+    private func showsIcon(for slice: CategorySlice) -> Bool {
+        guard let range = sliceRanges.first(where: { $0.slice.id == slice.id }) else { return false }
+        return (range.end - range.start) >= 20
+    }
+
+    /// Resolves a tap point (in the chart's plot-area coordinate space) to the slice whose
+    /// angular range contains it — a deterministic replacement for Swift Charts'
+    /// `chartAngleSelection`, which was unreliable here and kept resolving taps back to the
+    /// largest wedge instead of the one actually tapped.
+    private func slice(at point: CGPoint, in rect: CGRect) -> CategorySlice? {
+        let outerRadius = min(rect.width, rect.height) / 2
+        guard outerRadius > 0 else { return nil }
+        let dx = point.x - rect.midX
+        let dy = point.y - rect.midY
+        let distance = (dx * dx + dy * dy).squareRoot()
+        guard distance >= outerRadius * 0.62, distance <= outerRadius else { return nil }
+
+        var degrees = atan2(dy, dx) * 180 / .pi + 90
+        if degrees < 0 { degrees += 360 }
+        return sliceRanges.first { degrees >= $0.start && degrees < $0.end }?.slice
     }
 
     var body: some View {
@@ -207,32 +226,53 @@ private struct DonutBreakdownCard: View {
                     .foregroundStyle(.white.opacity(0.4))
                     .frame(height: 220)
             } else {
-                ZStack {
-                    Chart(slices) { slice in
-                        SectorMark(
-                            angle: .value("Amount", slice.amount.doubleValue),
-                            innerRadius: .ratio(0.62),
-                            angularInset: 2
-                        )
-                        // Sectors need a discrete "by" channel for Charts to treat each one as
-                        // its own stacked wedge — a constant .foregroundStyle() here collapses
-                        // them all into a single full-circle mark showing only the largest value.
-                        .foregroundStyle(by: .value("Head Category", slice.name))
-                        .cornerRadius(6)
-                        .opacity(highlightedSlice == nil || highlightedSlice?.id == slice.id ? 1 : 0.35)
-                    }
-                    .chartForegroundStyleScale(
-                        domain: slices.map(\.name),
-                        range: slices.map { Color(hex: $0.colorHex) }
+                Chart(slices) { slice in
+                    SectorMark(
+                        angle: .value("Amount", slice.amount.doubleValue),
+                        innerRadius: .ratio(0.62),
+                        angularInset: 2
                     )
-                    // Reports back which point in the cumulative "Amount" domain a tap landed
-                    // on, so touching any wedge — not just the biggest — updates the center label.
-                    .chartAngleSelection(value: $tappedAmount)
-                    .frame(height: 220)
-                    .chartLegend(.hidden)
+                    // Sectors need a discrete "by" channel for Charts to treat each one as
+                    // its own stacked wedge — a constant .foregroundStyle() here collapses
+                    // them all into a single full-circle mark showing only the largest value.
+                    .foregroundStyle(by: .value("Head Category", slice.name))
+                    .cornerRadius(6)
+                    .opacity(highlightedSlice == nil || highlightedSlice?.id == slice.id ? 1 : 0.35)
+                }
+                .chartForegroundStyleScale(
+                    domain: slices.map(\.name),
+                    range: slices.map { Color(hex: $0.colorHex) }
+                )
+                .frame(height: 220)
+                .chartLegend(.hidden)
+                .chartOverlay { proxy in
+                    GeometryReader { geometry in
+                        if let plotFrame = proxy.plotFrame {
+                            let rect = geometry[plotFrame]
+                            let radius = min(rect.width, rect.height) / 2 * 0.81
 
-                    sliceIcons
-                        .allowsHitTesting(false)
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { location in
+                                    guard let tapped = slice(at: location, in: rect) else { return }
+                                    withAnimation(.easeOut(duration: 0.15)) { selectedSliceID = tapped.id }
+                                }
+
+                            ForEach(slices.filter(showsIcon)) { slice in
+                                let angle = midAngle(for: slice)
+                                Image(systemName: slice.icon)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 22, height: 22)
+                                    .background(Color.black.opacity(0.28), in: Circle())
+                                    .position(
+                                        x: rect.midX + radius * CGFloat(cos(angle.radians)),
+                                        y: rect.midY + radius * CGFloat(sin(angle.radians))
+                                    )
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    }
                 }
                 .overlay {
                     if let highlightedSlice {
@@ -251,28 +291,6 @@ private struct DonutBreakdownCard: View {
         }
         .padding(20)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24))
-    }
-
-    private var sliceIcons: some View {
-        GeometryReader { geometry in
-            let side = min(geometry.size.width, geometry.size.height)
-            // Midway between the donut's inner (0.62) and outer (1.0) radius.
-            let radius = side / 2 * 0.81
-            let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
-
-            ForEach(slices) { slice in
-                let angle = midAngle(for: slice)
-                Image(systemName: slice.icon)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(Color.black.opacity(0.28), in: Circle())
-                    .position(
-                        x: center.x + radius * CGFloat(cos(angle.radians)),
-                        y: center.y + radius * CGFloat(sin(angle.radians))
-                    )
-            }
-        }
     }
 }
 

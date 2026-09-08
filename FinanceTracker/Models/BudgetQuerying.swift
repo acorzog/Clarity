@@ -16,4 +16,8 @@ extension Array where Element == Budget {
     func amount(for category: Category, month: Date) -> Decimal {
         budget(for: category, month: month)?.monthlyLimit ?? 0
     }
+
+    func isHidden(for category: Category, month: Date) -> Bool {
+        budget(for: category, month: month)?.isHidden ?? false
+    }
 }

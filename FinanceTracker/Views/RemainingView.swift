@@ -1,8 +1,23 @@
 import SwiftUI
 import SwiftData
 
+enum RemainingLayout: String, CaseIterable {
+    case list
+    case compact
+
+    /// The layout a toolbar toggle switches *to* — used to pick that button's icon.
+    var other: RemainingLayout { self == .list ? .compact : .list }
+    var icon: String {
+        switch self {
+        case .list: "list.bullet"
+        case .compact: "square.grid.2x2.fill"
+        }
+    }
+}
+
 struct RemainingView: View {
     let month: Date
+    var layout: RemainingLayout = .list
 
     @ObservedObject private var settings = BudgetSettingsStore.shared
     @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
@@ -131,13 +146,24 @@ struct RemainingView: View {
                     ForEach(headCategories) { head in
                         let categories = expenseCategories(for: head)
                         if let summary = headSummaries.first(where: { $0.id == head.id }) {
-                            HeadRemainingSection(
-                                head: summary,
-                                categories: categories,
-                                spentFor: spent,
-                                budgetedFor: budgeted,
-                                entriesFor: entries
-                            )
+                            switch layout {
+                            case .list:
+                                HeadRemainingSection(
+                                    head: summary,
+                                    categories: categories,
+                                    spentFor: spent,
+                                    budgetedFor: budgeted,
+                                    entriesFor: entries
+                                )
+                            case .compact:
+                                HeadRemainingGridSection(
+                                    head: summary,
+                                    categories: categories,
+                                    spentFor: spent,
+                                    budgetedFor: budgeted,
+                                    entriesFor: entries
+                                )
+                            }
                         }
                     }
 
@@ -332,6 +358,94 @@ private struct HeadRemainingSection: View {
     }
 }
 
+/// The compact alternative to `HeadRemainingSection` — a grid of icon tiles instead of full-width
+/// rows, so a whole head category's categories can be scanned at a glance.
+private struct HeadRemainingGridSection: View {
+    let head: HeadRemainingSummary
+    let categories: [Category]
+    let spentFor: (Category) -> Decimal
+    let budgetedFor: (Category) -> Decimal
+    let entriesFor: (Category) -> [Entry]
+
+    private let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Circle()
+                    .fill(Color(hex: head.colorHex))
+                    .frame(width: 10, height: 10)
+                Text(head.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("\(head.left.currencyFormatted) left")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(head.left >= 0 ? Color.white.opacity(0.6) : Color.expenseRed)
+            }
+
+            LazyVGrid(columns: columns, spacing: 18) {
+                ForEach(categories) { category in
+                    NavigationLink {
+                        CategoryEntriesDetailView(title: category.name, entries: entriesFor(category))
+                    } label: {
+                        CategoryGridCell(
+                            category: category,
+                            spent: spentFor(category),
+                            budgeted: budgetedFor(category)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(16)
+            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+}
+
+private struct CategoryGridCell: View {
+    let category: Category
+    let spent: Decimal
+    let budgeted: Decimal
+
+    private var progress: Double {
+        guard budgeted > 0 else { return spent > 0 ? 1 : 0 }
+        return min((spent / budgeted).doubleValue, 1)
+    }
+
+    private var isOverBudget: Bool { budgeted > 0 && spent > budgeted }
+    private var ringColor: Color { isOverBudget ? .expenseRed : Color(hex: category.resolvedColorHex) }
+    private var left: Decimal { budgeted - spent }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.1), lineWidth: 3)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(ringColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                CategoryIconView(category: category, size: 50)
+            }
+            .frame(width: 64, height: 64)
+
+            Text(category.name)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Text("\(left.currencyFormatted) left")
+                .font(.caption2)
+                .foregroundStyle(isOverBudget ? Color.expenseRed : .white.opacity(0.45))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
 
 private struct CategoryProgressRow: View {
     let name: String

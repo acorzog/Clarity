@@ -1,6 +1,11 @@
 import SwiftUI
 import SwiftData
 
+private enum PlanGroupKey: Hashable {
+    case income
+    case head(PersistentIdentifier)
+}
+
 struct PlanView: View {
     let month: Date
 
@@ -12,6 +17,7 @@ struct PlanView: View {
     @State private var pendingNewHeadCategory: HeadCategory?
     @State private var autoStartAddCategoryFor: PersistentIdentifier?
     @State private var newlyCreatedCategoryID: PersistentIdentifier?
+    @State private var collapsedGroups: Set<PlanGroupKey> = []
 
     private var incomeHeadCategory: HeadCategory? {
         headCategories.first { $0.name == "Income" } ?? headCategories.first { head in
@@ -25,12 +31,28 @@ struct PlanView: View {
             .sorted { $0.name < $1.name }
     }
 
+    private var visibleIncomeCategories: [Category] {
+        incomeCategories.filter { !allBudgets.isHidden(for: $0, month: month) }
+    }
+
+    private var hiddenIncomeCategories: [Category] {
+        incomeCategories.filter { allBudgets.isHidden(for: $0, month: month) }
+    }
+
     private var expenseHeadCategories: [HeadCategory] {
         headCategories.filter { $0 !== incomeHeadCategory }
     }
 
     private func expenseCategories(for head: HeadCategory) -> [Category] {
         head.categories.filter { !$0.isIncome && !$0.isArchived }.sorted { $0.name < $1.name }
+    }
+
+    private func visibleExpenseCategories(for head: HeadCategory) -> [Category] {
+        expenseCategories(for: head).filter { !allBudgets.isHidden(for: $0, month: month) }
+    }
+
+    private func hiddenExpenseCategories(for head: HeadCategory) -> [Category] {
+        expenseCategories(for: head).filter { allBudgets.isHidden(for: $0, month: month) }
     }
 
     private func setAmount(_ amount: Decimal, for category: Category) {
@@ -42,9 +64,13 @@ struct PlanView: View {
         }
     }
 
-    private func deleteBudget(for category: Category) {
-        guard let existing = allBudgets.budget(for: category, month: month) else { return }
-        modelContext.delete(existing)
+    private func setHidden(_ hidden: Bool, for category: Category) {
+        if let existing = allBudgets.budget(for: category, month: month) {
+            existing.isHidden = hidden
+        } else if hidden {
+            let (m, y) = month.monthYearComponents
+            modelContext.insert(Budget(category: category, monthlyLimit: 0, month: m, year: y, isHidden: true))
+        }
     }
 
     private func addCategory(name: String, to head: HeadCategory, isIncome: Bool) {
@@ -54,16 +80,29 @@ struct PlanView: View {
     }
 
     private var totalPlannedIncome: Decimal {
-        incomeCategories.reduce(Decimal(0)) { $0 + allBudgets.amount(for: $1, month: month) }
+        visibleIncomeCategories.reduce(Decimal(0)) { $0 + allBudgets.amount(for: $1, month: month) }
     }
 
     private var totalPlannedExpenses: Decimal {
         expenseHeadCategories
-            .flatMap { expenseCategories(for: $0) }
+            .flatMap { visibleExpenseCategories(for: $0) }
             .reduce(Decimal(0)) { $0 + allBudgets.amount(for: $1, month: month) }
     }
 
     private var leftToBudget: Decimal { totalPlannedIncome - totalPlannedExpenses }
+
+    private func expandedBinding(for key: PlanGroupKey) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedGroups.contains(key) },
+            set: { isExpanded in
+                if isExpanded {
+                    collapsedGroups.remove(key)
+                } else {
+                    collapsedGroups.insert(key)
+                }
+            }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -80,15 +119,14 @@ struct PlanView: View {
 
             PlanSummaryCard(totalPlanned: totalPlannedExpenses, leftToBudget: leftToBudget)
 
-            CategoryGroupCard(title: "Income") {
+            CategoryGroupCard(title: "Income", isExpanded: expandedBinding(for: .income)) {
                 VStack(spacing: 0) {
-                    ForEach(incomeCategories) { category in
+                    ForEach(visibleIncomeCategories) { category in
                         PlannedAmountRow(
                             category: category,
                             amount: allBudgets.amount(for: category, month: month),
-                            hasBudget: allBudgets.budget(for: category, month: month) != nil,
                             onCommit: { setAmount($0, for: category) },
-                            onDelete: { deleteBudget(for: category) },
+                            onHide: { setHidden(true, for: category) },
                             autoFocus: category.persistentModelID == newlyCreatedCategoryID,
                             onAutoFocusConsumed: { newlyCreatedCategoryID = nil }
                         )
@@ -102,19 +140,23 @@ struct PlanView: View {
                             onCreate: { addCategory(name: $0, to: incomeHeadCategory, isIncome: true) }
                         )
                     }
+
+                    HiddenCategoriesSection(
+                        categories: hiddenIncomeCategories,
+                        onRestore: { setHidden(false, for: $0) }
+                    )
                 }
             }
 
             ForEach(expenseHeadCategories) { head in
-                CategoryGroupCard(title: head.name) {
+                CategoryGroupCard(title: head.name, isExpanded: expandedBinding(for: .head(head.persistentModelID))) {
                     VStack(spacing: 0) {
-                        ForEach(expenseCategories(for: head)) { category in
+                        ForEach(visibleExpenseCategories(for: head)) { category in
                             PlannedAmountRow(
                                 category: category,
                                 amount: allBudgets.amount(for: category, month: month),
-                                hasBudget: allBudgets.budget(for: category, month: month) != nil,
                                 onCommit: { setAmount($0, for: category) },
-                                onDelete: { deleteBudget(for: category) },
+                                onHide: { setHidden(true, for: category) },
                                 autoFocus: category.persistentModelID == newlyCreatedCategoryID,
                                 onAutoFocusConsumed: { newlyCreatedCategoryID = nil }
                             )
@@ -125,6 +167,11 @@ struct PlanView: View {
                             autoStart: head.persistentModelID == autoStartAddCategoryFor,
                             onStarted: { autoStartAddCategoryFor = nil },
                             onCreate: { addCategory(name: $0, to: head, isIncome: false) }
+                        )
+
+                        HiddenCategoriesSection(
+                            categories: hiddenExpenseCategories(for: head),
+                            onRestore: { setHidden(false, for: $0) }
                         )
                     }
                 }
@@ -145,16 +192,90 @@ struct PlanView: View {
 
 private struct CategoryGroupCard<Content: View>: View {
     let title: String
+    @Binding var isExpanded: Bool
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.6))
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+            } label: {
+                HStack {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
-            content
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+            if isExpanded {
+                content
+                    .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+}
+
+/// Lists categories hidden from this month's plan (via the swipe-to-hide row action) behind
+/// a collapsed disclosure, with a one-tap way to bring one back into view.
+private struct HiddenCategoriesSection: View {
+    let categories: [Category]
+    let onRestore: (Category) -> Void
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        if !categories.isEmpty {
+            VStack(spacing: 0) {
+                Divider().background(Color.white.opacity(0.08))
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "eye.slash")
+                            .font(.caption)
+                        Text("\(categories.count) hidden this month")
+                            .font(.caption)
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                    }
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.horizontal)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if isExpanded {
+                    ForEach(categories) { category in
+                        HStack(spacing: 12) {
+                            CategoryIconView(category: category, size: 24)
+                                .opacity(0.5)
+                            Text(category.name)
+                                .foregroundStyle(.white.opacity(0.5))
+                            Spacer()
+                            Button {
+                                onRestore(category)
+                            } label: {
+                                Image(systemName: "eye")
+                                    .foregroundStyle(Color.emerald)
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
         }
     }
 }
@@ -193,9 +314,8 @@ private struct PlanSummaryCard: View {
 private struct PlannedAmountRow: View {
     let category: Category
     let amount: Decimal
-    var hasBudget = false
     let onCommit: (Decimal) -> Void
-    var onDelete: () -> Void = {}
+    var onHide: () -> Void = {}
     var autoFocus = false
     var onAutoFocusConsumed: () -> Void = {}
 
@@ -203,7 +323,7 @@ private struct PlannedAmountRow: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        SwipeToDeleteRow(canDelete: hasBudget, onDelete: onDelete) {
+        SwipeToDeleteRow(canDelete: true, onDelete: onHide, icon: "eye.slash.fill", tint: Color.white.opacity(0.15)) {
             rowContent
         }
         .onAppear {

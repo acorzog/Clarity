@@ -6,6 +6,8 @@ import SwiftUI
 struct SwipeToDeleteRow<Content: View>: View {
     let canDelete: Bool
     let onDelete: () -> Void
+    var icon: String = "trash"
+    var tint: Color = .expenseRed
     @ViewBuilder let content: Content
 
     @State private var offset: CGFloat = 0
@@ -15,12 +17,12 @@ struct SwipeToDeleteRow<Content: View>: View {
         ZStack(alignment: .trailing) {
             if canDelete {
                 Button(action: delete) {
-                    Image(systemName: "trash")
+                    Image(systemName: icon)
                         .foregroundStyle(.white)
                         .frame(width: revealWidth)
                         .frame(maxHeight: .infinity)
                 }
-                .background(Color.expenseRed)
+                .background(tint)
             }
 
             content
@@ -33,21 +35,32 @@ struct SwipeToDeleteRow<Content: View>: View {
                     }
                 }
                 .offset(x: offset)
-                .gesture(
-                    DragGesture()
+                // `simultaneousGesture` (rather than `gesture`) lets the enclosing ScrollView's
+                // own pan gesture recognize alongside this one, instead of this row's DragGesture
+                // exclusively claiming every touch — including vertical scrolls — the moment it
+                // starts. The width/height comparison below then ignores drags that turn out to
+                // be vertical scrolling rather than a horizontal swipe.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 12)
                         .onChanged { value in
                             guard canDelete else { return }
-                            let translation = value.translation.width
-                            if translation < 0 {
-                                offset = max(translation, -revealWidth)
+                            let translation = value.translation
+                            guard abs(translation.width) > abs(translation.height) else { return }
+                            if translation.width < 0 {
+                                offset = max(translation.width, -revealWidth)
                             } else if offset < 0 {
-                                offset = min(0, offset + translation)
+                                offset = min(0, offset + translation.width)
                             }
                         }
                         .onEnded { value in
                             guard canDelete else { return }
+                            let translation = value.translation
+                            guard abs(translation.width) > abs(translation.height) else {
+                                withAnimation(.easeOut(duration: 0.2)) { offset = 0 }
+                                return
+                            }
                             withAnimation(.easeOut(duration: 0.2)) {
-                                offset = value.translation.width < -revealWidth / 2 ? -revealWidth : 0
+                                offset = translation.width < -revealWidth / 2 ? -revealWidth : 0
                             }
                         }
                 )

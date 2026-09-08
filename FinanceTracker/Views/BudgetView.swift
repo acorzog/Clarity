@@ -12,6 +12,7 @@ struct BudgetView: View {
     @State private var subTab: BudgetSubTab = .plan
     @State private var selectedMonth = Date.startOfMonth()
     @State private var showingSettings = false
+    @State private var remainingLayout: RemainingLayout = .list
 
     var body: some View {
         NavigationStack {
@@ -41,11 +42,14 @@ struct BudgetView: View {
                     case .plan:
                         PlanView(month: selectedMonth)
                     case .remaining:
-                        RemainingView(month: selectedMonth)
+                        RemainingView(month: selectedMonth, layout: remainingLayout)
                     case .insights:
                         InsightsView(month: selectedMonth)
                     }
                 }
+                // Lets a scroll gesture drag the keyboard down interactively instead of
+                // requiring the user to leave the screen just to type in another field.
+                .scrollDismissesKeyboard(.interactively)
             }
             .darkScreenBackground()
             .toolbar {
@@ -56,6 +60,19 @@ struct BudgetView: View {
                         Image(systemName: "gearshape.fill")
                             .font(.title2)
                             .foregroundStyle(LinearGradient.emeraldSky)
+                    }
+                }
+                if subTab == .remaining {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                remainingLayout = remainingLayout.other
+                            }
+                        } label: {
+                            Image(systemName: remainingLayout.other.icon)
+                                .font(.title2)
+                                .foregroundStyle(LinearGradient.emeraldSky)
+                        }
                     }
                 }
             }
