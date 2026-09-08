@@ -31,6 +31,10 @@ final class Settlement {
     var paymentMethod: SettlementPaymentMethod
     var date: Date
     var createdAt: Date
+    /// This settlement's own CloudKit record identity — nil until first mapped. Deliberately
+    /// separate from `transaction`/`Entry`, which never has a CloudKit counterpart at all — see
+    /// `CloudKitSharedEventMapper`.
+    var remoteID: UUID?
 
     var event: SharedEvent?
 

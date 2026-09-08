@@ -27,13 +27,30 @@ struct AddSharedExpenseView: View {
     @State private var showingDatePicker = false
     @State private var showingDeleteAlert = false
     @State private var hasLoaded = false
+    /// This device's resolved CloudKit identity for `event`, once known — resolved once (the
+    /// same call `resolveDefaultPayerIfNeeded()` already makes) and reused for every "You" label
+    /// on this screen, so nothing here calls `CKContainer.userRecordID()` more than once.
+    @State private var currentUserRecordID: String?
 
     @FocusState private var amountFieldFocused: Bool
 
     private var isEditing: Bool { expense != nil }
 
+    /// The candidate people for payer/participant selection. For a collaborative event this is
+    /// sourced from `event.eventParticipants` (never `event.participants` directly, and never
+    /// any global Person list — rule 25), filtered to active (non-removed) participants; for a
+    /// local-only event it's the existing, unchanged `event.participants`. The underlying
+    /// selection state below stays `Person`-keyed either way — only the list of *candidates*
+    /// changes, since `SharedExpense.paidBy`/`SharedExpenseParticipant.person` are (deliberately,
+    /// per the Phase 5 architecture) still local `Person` references; the CloudKit layer is what
+    /// resolves identity through `EventParticipant`, not this local domain model.
+    private var displayParticipants: [Person] {
+        guard event.isCollaborationEnabled else { return event.participants }
+        return event.eventParticipants.filter { !$0.isRemoved }.compactMap(\.person)
+    }
+
     private var selectedParticipantsInOrder: [Person] {
-        event.participants.filter { selectedParticipants.contains($0) }
+        displayParticipants.filter { selectedParticipants.contains($0) }
     }
 
     private var amountValue: Decimal? {
@@ -98,7 +115,7 @@ struct AddSharedExpenseView: View {
                             title: "Paid By",
                             iconName: nil,
                             iconColorHex: nil,
-                            valueName: paidBy.map { $0.isCurrentUser ? "You" : $0.displayName }
+                            valueName: paidBy.map { displayName(for: $0) }
                         ) {
                             showingPaidByPicker = true
                         }
@@ -127,7 +144,7 @@ struct AddSharedExpenseView: View {
                     .listRowBackground(Color.white.opacity(0.05))
 
                     Section {
-                        ForEach(event.participants, id: \.persistentModelID) { person in
+                        ForEach(displayParticipants, id: \.persistentModelID) { person in
                             participantRow(person)
                         }
                     } header: {
@@ -177,11 +194,14 @@ struct AddSharedExpenseView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: loadInitialState)
+        .task {
+            await resolveDefaultPayerIfNeeded()
+        }
         .sheet(isPresented: $showingCategoryPicker) {
             CategoryPickerView(selection: $selectedCategory, isIncome: false)
         }
         .sheet(isPresented: $showingPaidByPicker) {
-            SharedPersonPickerView(candidates: event.participants, selection: $paidBy, title: "Paid By")
+            SharedPersonPickerView(candidates: displayParticipants, selection: $paidBy, title: "Paid By", event: event, currentUserRecordID: currentUserRecordID)
         }
         .sheet(isPresented: $showingDatePicker) {
             DatePickerSheet(date: $date)
@@ -190,6 +210,9 @@ struct AddSharedExpenseView: View {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
                 if let expense {
+                    if event.isCollaborationEnabled {
+                        CollaborationSyncService.shared?.queueDeletion(of: expense, from: event)
+                    }
                     modelContext.delete(expense)
                 }
                 dismiss()
@@ -247,7 +270,7 @@ struct AddSharedExpenseView: View {
             .buttonStyle(.plain)
 
             PersonAvatar(person: person, size: 24)
-            Text(person.isCurrentUser ? "You" : person.displayName)
+            Text(displayName(for: person))
                 .foregroundStyle(.white)
 
             Spacer()
@@ -299,6 +322,12 @@ struct AddSharedExpenseView: View {
         guard !hasLoaded else { return }
         hasLoaded = true
 
+        if event.isCollaborationEnabled {
+            // Guarantees event.eventParticipants is populated before displayParticipants (and
+            // the pickers/default-selection below) ever read it — see that property's doc.
+            CollaborationSyncService.shared?.ensureEventParticipants(for: event)
+        }
+
         if let expense {
             amountText = "\(expense.amount)"
             note = expense.note
@@ -315,10 +344,31 @@ struct AddSharedExpenseView: View {
                 exactAmountText[person] = participant.amount.editableText()
             }
         } else {
-            selectedParticipants = Set(event.participants)
+            selectedParticipants = Set(displayParticipants)
+            // A reasonable synchronous first guess; resolveDefaultPayerIfNeeded() overrides this
+            // with the event-scoped identity for a collaborative event once it resolves (rule 3).
             paidBy = event.currentUser
             amountFieldFocused = true
         }
+    }
+
+    /// For a NEW collaborative expense, overrides the synchronous `event.currentUser` guess above
+    /// with the authoritative event-scoped default payer once the current CloudKit identity
+    /// resolves (rule 3: never `Person.isCurrentUser` as the collaborative source of truth). A
+    /// no-op for a local-only event, an edit, or when this device hasn't identified itself in
+    /// this event yet — in every one of those cases the existing behavior/selection stands.
+    private func resolveDefaultPayerIfNeeded() async {
+        guard event.isCollaborationEnabled, let service = CollaborationSyncService.shared else { return }
+        guard let userRecordID = await service.currentUserRecordID() else { return }
+        // Resolved once here and reused for every "You" label on this screen (below), whether
+        // this is a new expense or an edit — only the default-payer override is new-expense-only.
+        currentUserRecordID = userRecordID
+        guard !isEditing, let identifiedPerson = event.currentParticipant(for: userRecordID)?.person else { return }
+        paidBy = identifiedPerson
+    }
+
+    private func displayName(for person: Person) -> String {
+        event.displayName(for: person, currentUserRecordID: currentUserRecordID)
     }
 
     private func save() {
@@ -326,7 +376,14 @@ struct AddSharedExpenseView: View {
         let shares = computedShares
 
         let targetExpense: SharedExpense
+        // Captured before the old SharedExpenseParticipant rows are deleted below: this existing
+        // flow always deletes and recreates every share on an edit (even unchanged ones), which
+        // mints fresh remoteIDs for the recreated rows — without explicitly queuing the OLD ones
+        // for CloudKit deletion, their previous CKRecords would be orphaned as stale shares on
+        // the server rather than replaced (rule 13).
+        var obsoleteParticipantRemoteIDs: [UUID] = []
         if let expense {
+            obsoleteParticipantRemoteIDs = expense.participants.compactMap(\.remoteID)
             for participant in expense.participants {
                 modelContext.delete(participant)
             }
@@ -366,6 +423,12 @@ struct AddSharedExpenseView: View {
         }
 
         event.updatedAt = .now
+
+        if event.isCollaborationEnabled, let service = CollaborationSyncService.shared {
+            service.queueRemovalOfExpenseParticipants(obsoleteParticipantRemoteIDs, for: event)
+            service.queueUpload(of: event)
+        }
+
         dismiss()
     }
 }

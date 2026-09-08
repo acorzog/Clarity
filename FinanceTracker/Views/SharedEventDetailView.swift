@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import CloudKit
 
 /// A SharedEvent's full view — totals, expenses, participants, and the Settle entry point.
 /// Everything here reads the shared domain only; nothing on this screen touches personal
@@ -16,6 +17,19 @@ struct SharedEventDetailView: View {
     @State private var showingParticipantsPicker = false
     @State private var viewingTransaction: Entry?
     @State private var linkingSettlement: Settlement?
+
+    @State private var isSharingEvent = false
+    @State private var activeShare: CKShare?
+    @State private var showingCloudSharing = false
+    @State private var shareErrorMessage: String?
+
+    @State private var showingWhoAreYou = false
+    /// This device's resolved CloudKit identity for this event, once known — feeds both the
+    /// "Who are you?" sheet and, via `SharedEvent.displayName(for:currentUserRecordID:)`, every
+    /// "You" label on this screen. Resolved once by `checkParticipantIdentity()`'s existing
+    /// identity check (never a second CloudKit call), and supplied synchronously from here down
+    /// to rows so none of them ever call CKContainer.userRecordID() themselves.
+    @State private var currentUserRecordID: String?
 
     private var net: Decimal { event.outstandingNetBalance }
 
@@ -47,6 +61,25 @@ struct SharedEventDetailView: View {
         .navigationTitle(event.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // CloudKit collaboration is currently disabled (see CollaborationFeatureFlag) — the
+            // Personal Team build this ships as can't actually create a CKShare, so the action is
+            // hidden entirely rather than left tappable to fail. All of CloudSharingControllerRepresentable
+            // and CollaborationSyncService.share(event:) remain intact for when it's re-enabled.
+            if CollaborationFeatureFlag.isEnabled {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        shareEvent()
+                    } label: {
+                        if isSharingEvent {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(Color.skyBlue)
+                        }
+                    }
+                    .disabled(isSharingEvent)
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showingAddExpense = true
@@ -74,8 +107,81 @@ struct SharedEventDetailView: View {
         .sheet(item: $linkingSettlement) { settlement in
             AddSettlementTransactionView(settlement: settlement)
         }
+        .sheet(isPresented: $showingCloudSharing) {
+            if let activeShare, let service = CollaborationSyncService.shared {
+                CloudSharingControllerRepresentable(
+                    share: activeShare,
+                    container: service.container,
+                    eventTitle: event.title
+                ) {
+                    showingCloudSharing = false
+                }
+            }
+        }
+        .alert(
+            "Couldn't Share Event",
+            isPresented: Binding(
+                get: { shareErrorMessage != nil },
+                set: { isPresented in if !isPresented { shareErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { shareErrorMessage = nil }
+        } message: {
+            Text(shareErrorMessage ?? "")
+        }
         .navigationDestination(isPresented: $showingBalanceDetail) {
             SharedBalanceDetailView(event: event)
+        }
+        .sheet(isPresented: $showingWhoAreYou) {
+            if let currentUserRecordID {
+                WhoAreYouView(event: event, currentUserRecordID: currentUserRecordID)
+            }
+        }
+        .task(id: event.persistentModelID) {
+            await checkParticipantIdentity()
+        }
+    }
+
+    /// Entering a collaborative event: resolves this device's CloudKit identity once (stored in
+    /// `currentUserRecordID` for both the "Who are you?" gate below and every "You" label on this
+    /// screen), then, only if it isn't yet associated with one of this event's participants and
+    /// there's actually someone left to claim, presents "Who are you?" — otherwise this is a
+    /// silent no-op. Never blocks or affects ordinary local Shared Expenses usage: an unavailable
+    /// iCloud account, or a non-collaborative event, both simply skip this check entirely
+    /// (rule: Case E).
+    private func checkParticipantIdentity() async {
+        guard event.isCollaborationEnabled, let service = CollaborationSyncService.shared else { return }
+        guard let userRecordID = await service.currentUserRecordID() else { return }
+        currentUserRecordID = userRecordID
+        guard event.currentParticipant(for: userRecordID) == nil else { return }
+        guard !event.unclaimedParticipants.isEmpty else { return }
+        showingWhoAreYou = true
+    }
+
+    /// Behind the toolbar's share icon: checks iCloud availability first (never blocks ordinary
+    /// local Shared Expenses usage if it's unavailable — it just explains why sharing can't
+    /// proceed), then creates/reuses this event's `CKShare` and presents Apple's native sharing
+    /// UI. See `CollaborationSyncService.share(event:)` for the idempotent create-or-reuse logic.
+    private func shareEvent() {
+        guard let service = CollaborationSyncService.shared else {
+            shareErrorMessage = "Sharing isn't available right now."
+            return
+        }
+        isSharingEvent = true
+        Task {
+            defer { isSharingEvent = false }
+            let status = (try? await service.container.accountStatus()) ?? .couldNotDetermine
+            guard CloudAvailabilityMonitor.map(status) == .available else {
+                shareErrorMessage = "Sharing requires iCloud. Sign in to iCloud in Settings, then try again."
+                return
+            }
+            do {
+                activeShare = try await service.share(event: event)
+                showingCloudSharing = true
+            } catch {
+                shareErrorMessage = (error as? LocalizedError)?.errorDescription
+                    ?? "Couldn't share this event. Please try again."
+            }
         }
     }
 
@@ -146,11 +252,16 @@ struct SharedEventDetailView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(event.expenses.sorted { $0.date > $1.date }) { expense in
-                        SwipeToDeleteRow(canDelete: true, onDelete: { modelContext.delete(expense) }) {
+                        SwipeToDeleteRow(canDelete: true, onDelete: {
+                            if event.isCollaborationEnabled {
+                                CollaborationSyncService.shared?.queueDeletion(of: expense, from: event)
+                            }
+                            modelContext.delete(expense)
+                        }) {
                             Button {
                                 editingExpense = expense
                             } label: {
-                                SharedExpenseRow(expense: expense)
+                                SharedExpenseRow(expense: expense, currentUserRecordID: currentUserRecordID)
                                     .padding(.vertical, 10)
                                     .padding(.horizontal, 4)
                             }
@@ -183,7 +294,7 @@ struct SharedEventDetailView: View {
                 ForEach(event.participants, id: \.persistentModelID) { person in
                     HStack {
                         PersonAvatar(person: person)
-                        Text(person.isCurrentUser ? "You" : person.displayName)
+                        Text(event.displayName(for: person, currentUserRecordID: currentUserRecordID))
                             .foregroundStyle(.white)
                         Spacer()
                     }

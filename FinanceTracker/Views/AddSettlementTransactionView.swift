@@ -19,9 +19,20 @@ struct AddSettlementTransactionView: View {
     /// Guards against a fast double-tap on Confirm linking two Entries to the same Settlement
     /// before the sheet finishes dismissing.
     @State private var isSubmitting = false
+    /// This device's own event-scoped Person for a collaborative event — see `RecordPaymentView`'s
+    /// identical resolution. Needed here too: `isIncome` must resolve correctly (rule: preserve
+    /// existing direction behavior) even when this device's `Person.isCurrentUser`-flagged Person
+    /// was never added to this event's participants, as is the case for a synced event's
+    /// recipient (their own local "You" bookkeeping Person is a separate object from their
+    /// synced, event-scoped one — see EventParticipant).
+    @State private var identifiedYou: Person?
 
     private var isIncome: Bool {
-        settlement.toPerson?.isCurrentUser ?? true
+        let you = identifiedYou ?? settlement.event?.currentUser
+        if let you {
+            return settlement.toPerson === you
+        }
+        return settlement.toPerson?.isCurrentUser ?? true
     }
 
     var body: some View {
@@ -79,6 +90,16 @@ struct AddSettlementTransactionView: View {
             // Only pre-fill for money coming in — an outgoing settlement has no single obviously
             // correct expense category, so that case is left for the user to choose explicitly.
             if isIncome {
+                selectedCategory = Category.reimburse(in: allCategories)
+            }
+        }
+        .task {
+            guard let event = settlement.event, event.isCollaborationEnabled, let service = CollaborationSyncService.shared else { return }
+            guard let userRecordID = await service.currentUserRecordID() else { return }
+            identifiedYou = event.currentParticipant(for: userRecordID)?.person
+            // isIncome may have changed now that identity resolved — refresh a category picked
+            // from the stale default so it isn't left pointing at the wrong income/expense side.
+            if isIncome, selectedCategory == nil {
                 selectedCategory = Category.reimburse(in: allCategories)
             }
         }

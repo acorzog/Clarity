@@ -8,7 +8,8 @@ enum SharedModelContainer {
 
     static let schema = Schema([
         HeadCategory.self, Category.self, Wallet.self, Entry.self, Budget.self, SpendingInsight.self,
-        Person.self, SharedEvent.self, SharedExpense.self, SharedExpenseParticipant.self, Settlement.self
+        Person.self, SharedEvent.self, SharedExpense.self, SharedExpenseParticipant.self, Settlement.self,
+        EventParticipant.self
     ])
 
     static func make() -> ModelContainer {

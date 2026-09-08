@@ -25,6 +25,15 @@ struct RecordPaymentView: View {
     /// Guards against a fast double-tap on Confirm creating two Settlements (and two linked
     /// Entries) for the same payment before the sheet finishes dismissing.
     @State private var isSubmitting = false
+    /// This device's own event-scoped Person for a collaborative event, resolved via
+    /// `EventParticipant.userRecordID` (never `Person.isCurrentUser` — see rule: collaborative
+    /// identity must resolve through EventParticipant). `nil` for a local-only event, or before
+    /// resolution completes, in which case `event.currentUser` is used exactly as before.
+    @State private var identifiedYou: Person?
+
+    /// The Person representing "you" for constructing this settlement — event-scoped identity
+    /// when known, falling back to the existing local-only behavior otherwise.
+    private var you: Person? { identifiedYou ?? event.currentUser }
 
     private var calculatedOutstanding: Decimal {
         abs(event.outstandingBalance(for: person))
@@ -165,6 +174,9 @@ struct RecordPaymentView: View {
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: loadInitialState)
+        .task {
+            await resolveIdentifiedYouIfNeeded()
+        }
         .sheet(isPresented: $showingWalletPicker) {
             WalletPickerView(selection: $selectedWallet)
         }
@@ -185,12 +197,22 @@ struct RecordPaymentView: View {
         }
     }
 
+    /// For a collaborative event, resolves this device's own event-scoped Person once via
+    /// `EventParticipant.userRecordID` (rule: never `Person.isCurrentUser` as the collaborative
+    /// identity source). A no-op for a local-only event or when this device hasn't identified
+    /// itself in this event yet — `event.currentUser` (existing behavior) is used in that case.
+    private func resolveIdentifiedYouIfNeeded() async {
+        guard event.isCollaborationEnabled, let service = CollaborationSyncService.shared else { return }
+        guard let userRecordID = await service.currentUserRecordID() else { return }
+        identifiedYou = event.currentParticipant(for: userRecordID)?.person
+    }
+
     private func confirm() {
         guard !isSubmitting, let amountValue, amountValue <= calculatedOutstanding else { return }
         isSubmitting = true
 
-        let fromPerson = personOwesYou ? person : event.currentUser
-        let toPerson = personOwesYou ? event.currentUser : person
+        let fromPerson = personOwesYou ? person : you
+        let toPerson = personOwesYou ? you : person
 
         let settlement = Settlement(
             fromPerson: fromPerson,
@@ -213,9 +235,17 @@ struct RecordPaymentView: View {
             modelContext.insert(entry)
             entry.sharedSettlement = settlement
             settlement.transaction = entry
+            // entry/settlement.transaction is never uploaded — see CloudKitSharedEventMapper and
+            // the invariant this phase preserves: Personal Finance never crosses the CloudKit
+            // boundary, only the Settlement record itself does (queued below).
         }
 
         event.updatedAt = .now
+
+        if event.isCollaborationEnabled {
+            CollaborationSyncService.shared?.queueUpload(of: event)
+        }
+
         dismiss()
     }
 }

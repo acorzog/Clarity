@@ -127,6 +127,28 @@
 		FA4A7EA8B9A0EE12B0636038 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62DB8801D66ED609F34B573D /* AppPreferences.swift */; };
 		FA73D27C3175C3D4425A9013 /* Secrets.plist in Resources */ = {isa = PBXBuildFile; fileRef = 2DBB66381B07D29CF3857425 /* Secrets.plist */; };
 		FF84D82626808E4D1B9EAA3A /* AddSettlementTransactionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 142C68CA22B13743AED829B9 /* AddSettlementTransactionView.swift */; };
+		B878C3C816157E63FADC202D /* CloudKitSharedEventMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BD2C3416591BDCA0BAE373 /* CloudKitSharedEventMapper.swift */; };
+		B96661EA2389BF86A8433229 /* CloudKitSharedEventMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5B22EC16A30F63EF32983C5 /* CloudKitSharedEventMapperTests.swift */; };
+		7FE1F1DA10F0B077D894EF93 /* CollaborationLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E4CA6A09BD0922AA71655C1 /* CollaborationLog.swift */; };
+		99ECC3F546441F8AED276CC2 /* CloudAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9428F1699C038971A2EEE7E3 /* CloudAvailability.swift */; };
+		AA4C6E7DE468F56005C7F3AB /* CloudSharingControllerRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABE0BCE249C4749E325A5A7A /* CloudSharingControllerRepresentable.swift */; };
+		193D01AD3B6DC31C3F574534 /* CollaborationAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28444ED347EA0C980C105BE5 /* CollaborationAppDelegate.swift */; };
+		84DE5A5FC6439469AD8058EC /* CollaborationSharingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BF77E31680028018A76AB4E /* CollaborationSharingTests.swift */; };
+		7B6C772992557505EC6654C8 /* CollaborationReconciliationOrderingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D3256FDEFF7B48BB6007A41 /* CollaborationReconciliationOrderingTests.swift */; };
+		1DA662A0D91880AD7E3C9625 /* EventParticipant.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2DE3F3F41BF460F5333F214 /* EventParticipant.swift */; };
+		38C58666BEE6945DA56BD983 /* EventParticipant.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2DE3F3F41BF460F5333F214 /* EventParticipant.swift */; };
+		93ED17C9F793616C32A5A651 /* WhoAreYouView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42916EB31A210C780AC62E9A /* WhoAreYouView.swift */; };
+		5A609C68AC328034900B98D9 /* EventParticipantIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4D4945C43DD3B1059FDD7CD /* EventParticipantIdentityTests.swift */; };
+		0D19C10C40342D355F79B040 /* CollaborativeExpenseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDB18FDC3BA2F5FDB5A545BD /* CollaborativeExpenseTests.swift */; };
+		3DF30E629F7F48C6570AA1F5 /* EventDisplayIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E096A5F76BAF9D216AE95011 /* EventDisplayIdentityTests.swift */; };
+		B3499A831CEC8F9803D3B47C /* CollaborativeSettlementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12B4559550544AE637606FE3 /* CollaborativeSettlementTests.swift */; };
+		6B14EE09AF0B1FBA4BEE7131 /* EventScopedBalanceIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9458C99545F7F1DD6214F7D /* EventScopedBalanceIdentityTests.swift */; };
+		BAB2DE216EBB168D1D245BC4 /* CollaborationFeatureFlag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A24ECF439888845BA8C14BF8 /* CollaborationFeatureFlag.swift */; };
+		2C3751F44B2E815590FCECF0 /* CloudKitDeactivationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00DCC90C36D21987BB10727 /* CloudKitDeactivationTests.swift */; };
+		ECF444D37E0901EE52EDA5D2 /* CloudKitRecordIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7175511289353143BCA34222 /* CloudKitRecordIdentity.swift */; };
+		9EA0F0FEF501F2DD101797DC /* CollaborationSyncStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC0825511F0B5B1020AB205D /* CollaborationSyncStateStore.swift */; };
+		3F7527ABA394D491ADAD4AD2 /* CollaborationSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64345E706E2E07EFD3D16850 /* CollaborationSyncService.swift */; };
+		84CE4BFAA0CB4C328583EB58 /* CollaborationSyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B601FB8A8F7BC4B628133180 /* CollaborationSyncServiceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -201,6 +223,7 @@
 		5C22A334A371F4743DF630BB /* EntryQuerying.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryQuerying.swift; sourceTree = "<group>"; };
 		5CC43B385C59A1BFDB9A58B4 /* Wallet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wallet.swift; sourceTree = "<group>"; };
 		62C7D882BEF6682B5A31ADDE /* FinanceTracker.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = FinanceTracker.entitlements; sourceTree = "<group>"; };
+		7C3B788817A0B7F2745D1D66 /* FinanceTracker-LocalOnly.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "FinanceTracker-LocalOnly.entitlements"; sourceTree = "<group>"; };
 		62DB8801D66ED609F34B573D /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
 		6409FC67AB54BDC088B804BD /* MonthSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthSelector.swift; sourceTree = "<group>"; };
 		6AC6480AF33BE502AB7F03CA /* EditCategoriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditCategoriesView.swift; sourceTree = "<group>"; };
@@ -266,6 +289,27 @@
 		F98930BAE652FAEC4ABDCDCE /* BudgetSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetSettingsView.swift; sourceTree = "<group>"; };
 		FBC539B894FEE91D5073F2D1 /* CSVExporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CSVExporterTests.swift; sourceTree = "<group>"; };
 		FE4CE62F7564FD8AE5600C30 /* SharedExpense.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedExpense.swift; sourceTree = "<group>"; };
+		F4BD2C3416591BDCA0BAE373 /* CloudKitSharedEventMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitSharedEventMapper.swift; sourceTree = "<group>"; };
+		A5B22EC16A30F63EF32983C5 /* CloudKitSharedEventMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitSharedEventMapperTests.swift; sourceTree = "<group>"; };
+		1E4CA6A09BD0922AA71655C1 /* CollaborationLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationLog.swift; sourceTree = "<group>"; };
+		9428F1699C038971A2EEE7E3 /* CloudAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudAvailability.swift; sourceTree = "<group>"; };
+		ABE0BCE249C4749E325A5A7A /* CloudSharingControllerRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSharingControllerRepresentable.swift; sourceTree = "<group>"; };
+		28444ED347EA0C980C105BE5 /* CollaborationAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationAppDelegate.swift; sourceTree = "<group>"; };
+		7BF77E31680028018A76AB4E /* CollaborationSharingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationSharingTests.swift; sourceTree = "<group>"; };
+		8D3256FDEFF7B48BB6007A41 /* CollaborationReconciliationOrderingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationReconciliationOrderingTests.swift; sourceTree = "<group>"; };
+		E2DE3F3F41BF460F5333F214 /* EventParticipant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventParticipant.swift; sourceTree = "<group>"; };
+		42916EB31A210C780AC62E9A /* WhoAreYouView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoAreYouView.swift; sourceTree = "<group>"; };
+		D4D4945C43DD3B1059FDD7CD /* EventParticipantIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventParticipantIdentityTests.swift; sourceTree = "<group>"; };
+		DDB18FDC3BA2F5FDB5A545BD /* CollaborativeExpenseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborativeExpenseTests.swift; sourceTree = "<group>"; };
+		E096A5F76BAF9D216AE95011 /* EventDisplayIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDisplayIdentityTests.swift; sourceTree = "<group>"; };
+		12B4559550544AE637606FE3 /* CollaborativeSettlementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborativeSettlementTests.swift; sourceTree = "<group>"; };
+		B9458C99545F7F1DD6214F7D /* EventScopedBalanceIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventScopedBalanceIdentityTests.swift; sourceTree = "<group>"; };
+		A24ECF439888845BA8C14BF8 /* CollaborationFeatureFlag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationFeatureFlag.swift; sourceTree = "<group>"; };
+		C00DCC90C36D21987BB10727 /* CloudKitDeactivationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitDeactivationTests.swift; sourceTree = "<group>"; };
+		7175511289353143BCA34222 /* CloudKitRecordIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitRecordIdentity.swift; sourceTree = "<group>"; };
+		EC0825511F0B5B1020AB205D /* CollaborationSyncStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationSyncStateStore.swift; sourceTree = "<group>"; };
+		64345E706E2E07EFD3D16850 /* CollaborationSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationSyncService.swift; sourceTree = "<group>"; };
+		B601FB8A8F7BC4B628133180 /* CollaborationSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborationSyncServiceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -273,6 +317,16 @@
 			isa = PBXGroup;
 			children = (
 				21E87F8E7D27023691B4B121 /* CategorizationServiceTests.swift */,
+				A5B22EC16A30F63EF32983C5 /* CloudKitSharedEventMapperTests.swift */,
+				12B4559550544AE637606FE3 /* CollaborativeSettlementTests.swift */,
+				C00DCC90C36D21987BB10727 /* CloudKitDeactivationTests.swift */,
+				DDB18FDC3BA2F5FDB5A545BD /* CollaborativeExpenseTests.swift */,
+				8D3256FDEFF7B48BB6007A41 /* CollaborationReconciliationOrderingTests.swift */,
+				7BF77E31680028018A76AB4E /* CollaborationSharingTests.swift */,
+				E096A5F76BAF9D216AE95011 /* EventDisplayIdentityTests.swift */,
+				B9458C99545F7F1DD6214F7D /* EventScopedBalanceIdentityTests.swift */,
+				D4D4945C43DD3B1059FDD7CD /* EventParticipantIdentityTests.swift */,
+				B601FB8A8F7BC4B628133180 /* CollaborationSyncServiceTests.swift */,
 				FBC539B894FEE91D5073F2D1 /* CSVExporterTests.swift */,
 				87CF0C7F83EA55223C91268F /* IntentWalletResolutionTests.swift */,
 				058D6CE35B247CFBADCEDE5D /* TestSupport.swift */,
@@ -320,6 +374,7 @@
 			children = (
 				C5819A4B49AB20A4F7212123 /* Assets.xcassets */,
 				62C7D882BEF6682B5A31ADDE /* FinanceTracker.entitlements */,
+				7C3B788817A0B7F2745D1D66 /* FinanceTracker-LocalOnly.entitlements */,
 				D18D431A8067CD142B0612CE /* FinanceTrackerApp.swift */,
 				132A5E304FB138D2AF56B7F7 /* Info.plist */,
 				2DBB66381B07D29CF3857425 /* Secrets.plist */,
@@ -384,6 +439,7 @@
 				02A18428EC1AEA4781EDA8C8 /* SettleView.swift */,
 				422B3FC748864CE65D19722B /* SetWalletGoalView.swift */,
 				C29E2CAE5A10FD8E9117381E /* SharedBalanceDetailView.swift */,
+				ABE0BCE249C4749E325A5A7A /* CloudSharingControllerRepresentable.swift */,
 				4A45DB122240CB68F237E1D8 /* SharedEventDetailView.swift */,
 				93C9A475904BC9FE9942186A /* SharedEventRow.swift */,
 				8697D1FABAC11AE25B0313F3 /* SharedExpenseRow.swift */,
@@ -400,6 +456,7 @@
 				7D04B76F49FE95AC8667BC3E /* WalletsView.swift */,
 				15CB10043E3FBA5D22F2EC8D /* WalletTransactionRow.swift */,
 				5554A3DE7CB23C5AF98EF469 /* WalletTransactionsView.swift */,
+				42916EB31A210C780AC62E9A /* WhoAreYouView.swift */,
 				23B45C1FB0E66E7A7CABC0E4 /* WidgetsInfoView.swift */,
 			);
 			path = Views;
@@ -410,6 +467,14 @@
 			children = (
 				CDD17748882DFD40E4B32B7F /* AppLockService.swift */,
 				554CEBBF35F4000CCDAE1B11 /* CategorizationService.swift */,
+				9428F1699C038971A2EEE7E3 /* CloudAvailability.swift */,
+				7175511289353143BCA34222 /* CloudKitRecordIdentity.swift */,
+				F4BD2C3416591BDCA0BAE373 /* CloudKitSharedEventMapper.swift */,
+				28444ED347EA0C980C105BE5 /* CollaborationAppDelegate.swift */,
+				A24ECF439888845BA8C14BF8 /* CollaborationFeatureFlag.swift */,
+				1E4CA6A09BD0922AA71655C1 /* CollaborationLog.swift */,
+				64345E706E2E07EFD3D16850 /* CollaborationSyncService.swift */,
+				EC0825511F0B5B1020AB205D /* CollaborationSyncStateStore.swift */,
 				6EC2BC97778D555F92C9F4E7 /* CSVExporter.swift */,
 				A8752BA4D7283A2FAF0903AE /* SharedModelContainer.swift */,
 				A8147C5256F48861782D022C /* SharedSplitCalculator.swift */,
@@ -429,6 +494,7 @@
 				C83791F4D5423CFA2CB076B3 /* EmojiCatalog.swift */,
 				18A5C44340CB2705B9DC7DB9 /* Entry.swift */,
 				5C22A334A371F4743DF630BB /* EntryQuerying.swift */,
+				E2DE3F3F41BF460F5333F214 /* EventParticipant.swift */,
 				DE06DA8ADF92F3981FF9F3B9 /* HeadCategory.swift */,
 				8EB342D4F1299180A847448D /* IconCatalog.swift */,
 				8ADBBF66B204E5BE98BFE908 /* OverviewSettings.swift */,
@@ -558,6 +624,7 @@
 				09ECB0907BD1E183E108C91A /* EmojiCatalog.swift in Sources */,
 				2DCFF8EF091CB5AFCEAD4B4C /* Entry.swift in Sources */,
 				CB3055CB7F8DEEB3E0213C8D /* EntryQuerying.swift in Sources */,
+				38C58666BEE6945DA56BD983 /* EventParticipant.swift in Sources */,
 				6C64DDB61B556F8ED8FC932E /* FinanceTrackerWidgetBundle.swift in Sources */,
 				B3010F5CCEC4DA37A735F7C6 /* HeadCategory.swift in Sources */,
 				E8726E060C3FC153C8CEC4A2 /* IconCatalog.swift in Sources */,
@@ -586,6 +653,15 @@
 				AE87DA435067EDD2A85991E4 /* AppLockService.swift in Sources */,
 				9C91E56D3E63995FBB98CA83 /* AppLockSettingsView.swift in Sources */,
 				6F6D95FC49C414C044DBE7B6 /* AppPreferences.swift in Sources */,
+				99ECC3F546441F8AED276CC2 /* CloudAvailability.swift in Sources */,
+				ECF444D37E0901EE52EDA5D2 /* CloudKitRecordIdentity.swift in Sources */,
+				B878C3C816157E63FADC202D /* CloudKitSharedEventMapper.swift in Sources */,
+				AA4C6E7DE468F56005C7F3AB /* CloudSharingControllerRepresentable.swift in Sources */,
+				193D01AD3B6DC31C3F574534 /* CollaborationAppDelegate.swift in Sources */,
+				BAB2DE216EBB168D1D245BC4 /* CollaborationFeatureFlag.swift in Sources */,
+				7FE1F1DA10F0B077D894EF93 /* CollaborationLog.swift in Sources */,
+				3F7527ABA394D491ADAD4AD2 /* CollaborationSyncService.swift in Sources */,
+				9EA0F0FEF501F2DD101797DC /* CollaborationSyncStateStore.swift in Sources */,
 				59C211BD46AF513B73B918E5 /* AutomationsHelpView.swift in Sources */,
 				7DAFF67894CF643950614367 /* Budget.swift in Sources */,
 				795B9D1E4830F5F7BAA6C2D4 /* BudgetQuerying.swift in Sources */,
@@ -612,6 +688,7 @@
 				AF02ABE8223FDC71E4F851C6 /* EntryListView.swift in Sources */,
 				5D9DEF8F37FFB156B651D48C /* EntryQuerying.swift in Sources */,
 				6B110D710C7E022A81EF318E /* EntryRow.swift in Sources */,
+				1DA662A0D91880AD7E3C9625 /* EventParticipant.swift in Sources */,
 				DF307C19A06B6DE410511092 /* ExportCSVView.swift in Sources */,
 				250F036F620AD5154D650C31 /* FinanceTrackerApp.swift in Sources */,
 				94C16454B072DCEDBCA62E30 /* HeadCategory.swift in Sources */,
@@ -667,6 +744,7 @@
 				AFF9D3B2709E92A23B95578C /* WalletTransactionRow.swift in Sources */,
 				26A4EAAAE358B41856981D75 /* WalletTransactionsView.swift in Sources */,
 				C342FE690F87E9EB283FFA17 /* WalletsView.swift in Sources */,
+				93ED17C9F793616C32A5A651 /* WhoAreYouView.swift in Sources */,
 				CAEB12B623FF4DB86FA95D2F /* WidgetsInfoView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -677,6 +755,16 @@
 			files = (
 				7116B85E560427BAB4A10EAF /* CSVExporterTests.swift in Sources */,
 				3ECB766E4AF7CB129068B31A /* CategorizationServiceTests.swift in Sources */,
+				B96661EA2389BF86A8433229 /* CloudKitSharedEventMapperTests.swift in Sources */,
+				7B6C772992557505EC6654C8 /* CollaborationReconciliationOrderingTests.swift in Sources */,
+				84DE5A5FC6439469AD8058EC /* CollaborationSharingTests.swift in Sources */,
+				0D19C10C40342D355F79B040 /* CollaborativeExpenseTests.swift in Sources */,
+				B3499A831CEC8F9803D3B47C /* CollaborativeSettlementTests.swift in Sources */,
+				2C3751F44B2E815590FCECF0 /* CloudKitDeactivationTests.swift in Sources */,
+				3DF30E629F7F48C6570AA1F5 /* EventDisplayIdentityTests.swift in Sources */,
+				6B14EE09AF0B1FBA4BEE7131 /* EventScopedBalanceIdentityTests.swift in Sources */,
+				5A609C68AC328034900B98D9 /* EventParticipantIdentityTests.swift in Sources */,
+				84CE4BFAA0CB4C328583EB58 /* CollaborationSyncServiceTests.swift in Sources */,
 				752E4D06FFFF8808F5721B40 /* IntentWalletResolutionTests.swift in Sources */,
 				83538B0A5FCF1A0213CE2BBA /* TestSupport.swift in Sources */,
 				6AEA3535983B55ED6192BE72 /* WalletTests.swift in Sources */,
@@ -830,7 +918,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = FinanceTracker/FinanceTracker.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "FinanceTracker/FinanceTracker-LocalOnly.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2M7B75VY75;
@@ -880,7 +968,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = FinanceTracker/FinanceTracker.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "FinanceTracker/FinanceTracker-LocalOnly.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2M7B75VY75;

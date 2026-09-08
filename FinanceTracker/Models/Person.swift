@@ -13,6 +13,12 @@ final class Person {
     /// Marks a person worth resurfacing first when picking participants for a new event.
     var isFrequent: Bool
     var createdAt: Date
+    /// Stable local anchor used only to derive this person's CloudKit `Participant` record ID
+    /// for a given SharedEvent (combined with that event's own `remoteID`) — see
+    /// `CloudKitSharedEventMapper`. Not itself synced anywhere; a `Person` never becomes a
+    /// CloudKit record directly, since the same local `Person` can be reused across multiple
+    /// independently-shared events, each needing its own record.
+    var sharingAnchorID: UUID = UUID()
 
     @Relationship(inverse: \SharedEvent.participants)
     var sharedEvents: [SharedEvent] = []

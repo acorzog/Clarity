@@ -10,12 +10,24 @@ struct SharedPersonBalance: Identifiable {
 }
 
 extension SharedEvent {
+    /// "You," for the purposes of every balance calculation below. For a collaborative event this
+    /// is authoritative through the event-scoped `EventParticipant.userRecordID` (never
+    /// `Person.isCurrentUser` — see `EventParticipant`/`CollaborationCurrentUser`): a recipient's
+    /// own local `isCurrentUser`-flagged "You" bookkeeping Person is a separate object from the
+    /// synced Person representing them in this event, so using it here would resolve to nobody's
+    /// balance at all. A local-only event has no `EventParticipant` rows and keeps the original,
+    /// unchanged `Person.isCurrentUser` behavior.
     var currentUser: Person? {
-        participants.first { $0.isCurrentUser }
+        guard isCollaborationEnabled else {
+            return participants.first { $0.isCurrentUser }
+        }
+        guard let userRecordID = CollaborationCurrentUser.userRecordID else { return nil }
+        return currentParticipant(for: userRecordID)?.person
     }
 
     var otherParticipants: [Person] {
-        participants.filter { !$0.isCurrentUser }
+        guard let currentUser else { return participants }
+        return participants.filter { $0 !== currentUser }
     }
 
     var totalAmount: Decimal {

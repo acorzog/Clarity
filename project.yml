@@ -17,7 +17,7 @@ targets:
       - target: FinanceTrackerWidgets
         embed: true
     entitlements:
-      path: FinanceTracker/FinanceTracker.entitlements
+      path: FinanceTracker/FinanceTracker-LocalOnly.entitlements
       properties:
         com.apple.security.application-groups:
           - group.com.andreacorzo.FinanceTracker

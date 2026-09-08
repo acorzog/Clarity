@@ -19,10 +19,26 @@ final class SharedExpense {
     var splitMethod: SharedSplitMethod
     var createdAt: Date
     var updatedAt: Date
+    /// This expense's own CloudKit record identity — nil until first mapped. See
+    /// `CloudKitSharedEventMapper`.
+    var remoteID: UUID?
 
     /// Reuses the existing personal `Category` model rather than a separate shared taxonomy.
+    /// `nil` for an expense this device received from another participant — see the snapshot
+    /// fields below.
     @Relationship(deleteRule: .nullify)
     var category: Category?
+
+    /// Read-only display snapshot of another participant's category, received via CloudKit —
+    /// populated only when this expense arrived from elsewhere (`category` is nil in that case)
+    /// and never resolved back to this device's own personal `Category` table (see CRITICAL
+    /// rule: a remote category snapshot must never alter or create a personal category). When
+    /// this device is the one that created the expense, these stay nil and `category` is used
+    /// directly; `CloudKitSharedEventMapper` falls back to these when `category` is nil so the
+    /// snapshot survives even if this device later edits an expense it didn't originate.
+    var remoteCategoryName: String?
+    var remoteCategoryIcon: String?
+    var remoteCategoryColorHex: String?
 
     var paidBy: Person?
 
@@ -62,6 +78,9 @@ final class SharedExpense {
 final class SharedExpenseParticipant {
     var amount: Decimal
     var parts: Int?
+    /// This share's own CloudKit record identity — nil until first mapped. See
+    /// `CloudKitSharedEventMapper`.
+    var remoteID: UUID?
 
     var person: Person?
     var expense: SharedExpense?

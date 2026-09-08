@@ -8,6 +8,15 @@ struct SharedPersonPickerView: View {
     let candidates: [Person]
     @Binding var selection: Person?
     var title = "Who Paid"
+    /// When set (the collaborative Add Expense flow), labels use the event-scoped "You"
+    /// resolution instead of `Person.isCurrentUser` — see `SharedEvent.displayName(for:currentUserRecordID:)`.
+    /// Both default to nil so this view's existing behavior is unchanged wherever they aren't supplied.
+    var event: SharedEvent?
+    var currentUserRecordID: String?
+
+    private func label(for person: Person) -> String {
+        event?.displayName(for: person, currentUserRecordID: currentUserRecordID) ?? (person.isCurrentUser ? "You" : person.displayName)
+    }
 
     var body: some View {
         NavigationStack {
@@ -19,7 +28,7 @@ struct SharedPersonPickerView: View {
                     } label: {
                         HStack {
                             PersonAvatar(person: person)
-                            Text(person.isCurrentUser ? "You" : person.displayName)
+                            Text(label(for: person))
                                 .foregroundStyle(.white)
                             Spacer()
                             if selection === person {
