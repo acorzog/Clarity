@@ -1,5 +1,21 @@
-# Secrets — never commit real API keys
-FinanceTracker/Secrets.plist
+# Secrets & personal info — never commit real API keys, credentials, certs, or exported user data
+**/Secrets.plist
+.env
+.env.*
+.netrc
+*credentials*.json
+*credentials*.plist
+*secrets*.json
+*.pem
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.keychain
+*.keychain-db
+GoogleService-Info.plist
+*-Info.private.plist
+*.xcresult
 
 # Xcode
 .DS_Store
