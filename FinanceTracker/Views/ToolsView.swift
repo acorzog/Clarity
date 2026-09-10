@@ -20,11 +20,12 @@ struct ToolsView: View {
         ToolItem(title: "Widgets", icon: "apps.iphone", isAvailable: true),
         ToolItem(title: "Automations", icon: "wand.and.stars", isAvailable: true),
         ToolItem(title: "App Lock", icon: "lock.fill", isAvailable: true),
+        ToolItem(title: "Backup & Restore", icon: "arrow.triangle.2.circlepath", isAvailable: true),
         ToolItem(title: "Reminders", icon: "bell.fill", isAvailable: false),
         ToolItem(title: "Bank Connections", icon: "building.columns.fill", isAvailable: false)
     ]
 
-    private let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 16)]
 
     var body: some View {
         NavigationStack {
@@ -45,6 +46,7 @@ struct ToolsView: View {
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 24)
+                    .readableContentWidth()
                 }
             }
             .darkScreenBackground()
@@ -68,6 +70,8 @@ struct ToolsView: View {
             AutomationsHelpView()
         case "App Lock":
             AppLockSettingsView()
+        case "Backup & Restore":
+            BackupRestoreView()
         default:
             ComingSoonView(title: item.title, icon: item.icon)
         }

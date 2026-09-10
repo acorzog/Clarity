@@ -70,6 +70,23 @@ extension View {
     }
 }
 
+private struct ReadableContentWidth: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: 700)
+            .frame(maxWidth: .infinity)
+    }
+}
+
+extension View {
+    /// Caps and centers content at a comfortable reading width on wide screens (iPad's sidebar
+    /// detail column, iPad landscape) — a no-op on narrow ones (iPhone, iPad Split View) since
+    /// 700pt already exceeds their width.
+    func readableContentWidth() -> some View {
+        modifier(ReadableContentWidth())
+    }
+}
+
 extension Decimal {
     var doubleValue: Double { (self as NSDecimalNumber).doubleValue }
 

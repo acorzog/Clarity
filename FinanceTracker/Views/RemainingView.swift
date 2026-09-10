@@ -352,7 +352,16 @@ private struct HeadRemainingGridSection: View {
     let budgetedFor: (Category) -> Decimal
     let entriesFor: (Category) -> [Entry]
 
-    private let columns = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    /// 3 fixed columns on iPhone (unchanged, original tuning) — on iPad's wider regular-width
+    /// canvas, an adaptive column count instead so the grid actually uses the extra space rather
+    /// than just stretching 3 tiles wider.
+    private var columns: [GridItem] {
+        horizontalSizeClass == .regular
+            ? [GridItem(.adaptive(minimum: 150), spacing: 18)]
+            : [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

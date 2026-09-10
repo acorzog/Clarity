@@ -21,6 +21,7 @@
 		09ECB0907BD1E183E108C91A /* EmojiCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83791F4D5423CFA2CB076B3 /* EmojiCatalog.swift */; };
 		0CF5906FCEE15758D7F9E15C /* SpendingInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = B941AC8417258E3D52720441 /* SpendingInsight.swift */; };
 		0D35D2575A4AD152CB374C89 /* DayEntriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C227E089A56EE0E5D312D67 /* DayEntriesView.swift */; };
+		0DB49AA839B54B5D469CD3CB /* LocalBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E7590F030A567FC5D9699E /* LocalBackupService.swift */; };
 		0DBB3B15A296650A29C6499E /* SharedHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 094A796D853A386B2AB2B2D4 /* SharedHomeView.swift */; };
 		0EC98EF71E6317F82BFBF9E7 /* Phase2JPolishTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09BF6F60FEEF56CA9BB5AB2E /* Phase2JPolishTests.swift */; };
 		10AEF2D642A1752310FA0977 /* LockScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA10F827A193E0E9BBB9FE7D /* LockScreenView.swift */; };
@@ -136,6 +137,7 @@
 		5FD8E73003EBA834BE8B8FFD /* CategoryPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE34AF112F6EEF3BFCA60B9 /* CategoryPickerView.swift */; };
 		602A67551CB6532CC2356D92 /* WalletEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3903F7A0319C907045E879ED /* WalletEditorView.swift */; };
 		608D592C208221DB2507F1E9 /* Goal.swift in Sources */ = {isa = PBXBuildFile; fileRef = B54E89A64D1713CBC000F711 /* Goal.swift */; };
+		61D224BE1528C1E05538662B /* LocalBackupServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CE48850D274581CE685F7D7 /* LocalBackupServiceTests.swift */; };
 		627DF3EF97CBFEF6404A8B49 /* SetPINView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0770B7839320E46F8AB2C66B /* SetPINView.swift */; };
 		633E267E7E55A3F68CD7C34C /* BudgetCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 796AFDE0C19EB580D49DAFE2 /* BudgetCalculator.swift */; };
 		644C664331AD9D52EB4E5BAE /* BudgetEligibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = A300589A9A49F8098F3363FF /* BudgetEligibility.swift */; };
@@ -290,6 +292,7 @@
 		CB88A392111F4A1CCE83C3A7 /* ToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38EB981ADE7FE4CD89BD9551 /* ToolsView.swift */; };
 		CBF5FF15BD9B6D3FFDB8BE1F /* BudgetGaugeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8B566BDD6F49AFAC210D04 /* BudgetGaugeWidget.swift */; };
 		CC153209952F43E8976B9413 /* CurrencyValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C900CC8A600F76426376496 /* CurrencyValue.swift */; };
+		CC5B563BF6986999984520E3 /* BackupRestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BA1AD279854E11CE7AB6789 /* BackupRestoreView.swift */; };
 		CC763F29310EE1C2A0C701E7 /* CollaborationSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A4DB517D07B55AFED89B8E2 /* CollaborationSyncService.swift */; };
 		CC93FBC230634FBD51FDF045 /* SettleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02A18428EC1AEA4781EDA8C8 /* SettleView.swift */; };
 		CE8CC7A8BF99AB5B58BEA3A8 /* Wallet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC43B385C59A1BFDB9A58B4 /* Wallet.swift */; };
@@ -301,9 +304,11 @@
 		D4850498A60BE44BBDE476F4 /* TrendChartAccessibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C5D6A942996354C1DB733D2 /* TrendChartAccessibilityTests.swift */; };
 		D521D93DB67306C1C178E76D /* SharedEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B3F2BFFD866A7BBB5546FE1 /* SharedEvent.swift */; };
 		D6B8EC2DFF770A7FC16DA055 /* BudgetSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE14F8D72BA7789DB5B630B /* BudgetSettings.swift */; };
+		D7CFEFF4F9DD72874D3EDABF /* LocalBackupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0E7590F030A567FC5D9699E /* LocalBackupService.swift */; };
 		D7F47102A0438D3D28A7602C /* SwipeToDeleteRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F646B60A20880E405F02430 /* SwipeToDeleteRow.swift */; };
 		D8954B7AF162350FAA942BCA /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F0791D8ABC5FE823CEE0EC0 /* RootView.swift */; };
 		D956C7817CE5D0CD895F815A /* OverviewSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ADBBF66B204E5BE98BFE908 /* OverviewSettings.swift */; };
+		DC540DFAB336C0FF7B761EB6 /* BackupRestoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BA1AD279854E11CE7AB6789 /* BackupRestoreView.swift */; };
 		DCFCA5EAB285F70116E8511D /* GoalEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1DC4632655AA6FD23B657D /* GoalEditorView.swift */; };
 		DE4E6B9D5BC5056EEDF48625 /* Person.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA4C4496C5CF2B4DF145D999 /* Person.swift */; };
 		DEC6FD1591A16DDF26BC2B6D /* AddSharedExpenseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B44DFDF94879A9DEAE2A584 /* AddSharedExpenseView.swift */; };
@@ -427,6 +432,7 @@
 		4A45DB122240CB68F237E1D8 /* SharedEventDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedEventDetailView.swift; sourceTree = "<group>"; };
 		4B26B266269B89A1A68EFA06 /* LogExpenseIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogExpenseIntent.swift; sourceTree = "<group>"; };
 		4B3F2BFFD866A7BBB5546FE1 /* SharedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedEvent.swift; sourceTree = "<group>"; };
+		4CE48850D274581CE685F7D7 /* LocalBackupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBackupServiceTests.swift; sourceTree = "<group>"; };
 		4DAC41A20B8AAFC809875C63 /* SharedEventQuerying.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedEventQuerying.swift; sourceTree = "<group>"; };
 		4DE34AF112F6EEF3BFCA60B9 /* CategoryPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryPickerView.swift; sourceTree = "<group>"; };
 		4DFA766E61F21706EB429A39 /* AddGoalMoneyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddGoalMoneyView.swift; sourceTree = "<group>"; };
@@ -470,6 +476,7 @@
 		888CEAE6E32E8C6A31CA5B0E /* Budget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Budget.swift; sourceTree = "<group>"; };
 		889B72B2AF94D8B1423049DC /* ContributionEntryPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContributionEntryPickerView.swift; sourceTree = "<group>"; };
 		8ADBBF66B204E5BE98BFE908 /* OverviewSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewSettings.swift; sourceTree = "<group>"; };
+		8BA1AD279854E11CE7AB6789 /* BackupRestoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreView.swift; sourceTree = "<group>"; };
 		8C1C93FA9E1DC287B3A80FC0 /* GaugeThreshold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GaugeThreshold.swift; sourceTree = "<group>"; };
 		8EB342D4F1299180A847448D /* IconCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconCatalog.swift; sourceTree = "<group>"; };
 		8F0791D8ABC5FE823CEE0EC0 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -506,6 +513,7 @@
 		BBD48A82BC1E4FE51C8590D0 /* CloudSharingControllerRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSharingControllerRepresentable.swift; sourceTree = "<group>"; };
 		BC09CAC1187871D9A2366879 /* PlanContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanContainerView.swift; sourceTree = "<group>"; };
 		BF1C79856D2AF8DF3A2AB3AC /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		C0E7590F030A567FC5D9699E /* LocalBackupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBackupService.swift; sourceTree = "<group>"; };
 		C1A4B89CE67ED68D8B08C635 /* CollaborativeExpenseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaborativeExpenseTests.swift; sourceTree = "<group>"; };
 		C29E2CAE5A10FD8E9117381E /* SharedBalanceDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedBalanceDetailView.swift; sourceTree = "<group>"; };
 		C5819A4B49AB20A4F7212123 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -605,6 +613,7 @@
 				8359702E90DF8B0A53DC5AD3 /* GoalPresentationTests.swift */,
 				3109B568CD8EF96A31AC9E81 /* HomeCalculatorTests.swift */,
 				87CF0C7F83EA55223C91268F /* IntentWalletResolutionTests.swift */,
+				4CE48850D274581CE685F7D7 /* LocalBackupServiceTests.swift */,
 				2761317C8B070B80D1B809DA /* NetWorthCalculatorTests.swift */,
 				09BF6F60FEEF56CA9BB5AB2E /* Phase2JPolishTests.swift */,
 				5C6605AF3A1FC7ECA2442147 /* PreMigrationBudgetCalculationCharacterizationTests.swift */,
@@ -748,6 +757,7 @@
 				DE2EA0B49EAF6AD7635472E8 /* AddTransactionView.swift */,
 				9E1C52A22F2128858B06873F /* AppLockSettingsView.swift */,
 				82535FF9C00A3D5ED1681076 /* AutomationsHelpView.swift */,
+				8BA1AD279854E11CE7AB6789 /* BackupRestoreView.swift */,
 				F98930BAE652FAEC4ABDCDCE /* BudgetSettingsView.swift */,
 				B30B7886AF363FC49164F8FB /* BudgetView.swift */,
 				6BFE2623E75897ECA483B7C0 /* CalendarView.swift */,
@@ -826,6 +836,7 @@
 				9A4DB517D07B55AFED89B8E2 /* CollaborationSyncService.swift */,
 				107A4B83C6D2928232CCB3D7 /* CollaborationSyncStateStore.swift */,
 				6EC2BC97778D555F92C9F4E7 /* CSVExporter.swift */,
+				C0E7590F030A567FC5D9699E /* LocalBackupService.swift */,
 				A8752BA4D7283A2FAF0903AE /* SharedModelContainer.swift */,
 				A8147C5256F48861782D022C /* SharedSplitCalculator.swift */,
 				D394A8C93D950E1AAA69F840 /* SpendingInsightsService.swift */,
@@ -1056,6 +1067,7 @@
 				9C91E56D3E63995FBB98CA83 /* AppLockSettingsView.swift in Sources */,
 				6F6D95FC49C414C044DBE7B6 /* AppPreferences.swift in Sources */,
 				59C211BD46AF513B73B918E5 /* AutomationsHelpView.swift in Sources */,
+				CC5B563BF6986999984520E3 /* BackupRestoreView.swift in Sources */,
 				7DAFF67894CF643950614367 /* Budget.swift in Sources */,
 				A0AEA60D97DA4E9835568B9A /* BudgetCalculationSettings.swift in Sources */,
 				C5A186B1B64DF48F7AAFE2CB /* BudgetCalculator.swift in Sources */,
@@ -1118,6 +1130,7 @@
 				123E92E5DEB1BD6308AA8959 /* IconCatalog.swift in Sources */,
 				64F0A20C0E52CBABD1CCA6F5 /* InsightsView.swift in Sources */,
 				2F85144FC4A0FE57E7503C09 /* LaunchScreenView.swift in Sources */,
+				0DB49AA839B54B5D469CD3CB /* LocalBackupService.swift in Sources */,
 				10AEF2D642A1752310FA0977 /* LockScreenView.swift in Sources */,
 				4AE4725A916FCE1F3A5DEA18 /* LogExpenseIntent.swift in Sources */,
 				039E998354B36E63FC45D31F /* MainTabView.swift in Sources */,
@@ -1193,6 +1206,7 @@
 				C106682054EE8E75A162A429 /* AppLockSettingsView.swift in Sources */,
 				9A6B0639E4D408874FFA9E6F /* AppPreferences.swift in Sources */,
 				B710F1C0277EF84364884C4D /* AutomationsHelpView.swift in Sources */,
+				DC540DFAB336C0FF7B761EB6 /* BackupRestoreView.swift in Sources */,
 				2A67E22EF6515BF5E5F58A67 /* Budget.swift in Sources */,
 				BFE25913AEDBED23FEDB1B06 /* BudgetCalculationSettings.swift in Sources */,
 				8A79FF9F8EC3F0025F1762CD /* BudgetCalculator.swift in Sources */,
@@ -1255,6 +1269,7 @@
 				A0C103E55F0F0DC00149480C /* IconCatalog.swift in Sources */,
 				6AF7D736F9F12B25A034150C /* InsightsView.swift in Sources */,
 				740A094AF90D3F62D33FA8CE /* LaunchScreenView.swift in Sources */,
+				D7CFEFF4F9DD72874D3EDABF /* LocalBackupService.swift in Sources */,
 				B2A4AB65C45B28E213AD634A /* LockScreenView.swift in Sources */,
 				7AB86BA4BB2E87E26689EF71 /* LogExpenseIntent.swift in Sources */,
 				AF003760F7D4AEF24A2F29F1 /* MainTabView.swift in Sources */,
@@ -1343,6 +1358,7 @@
 				769538667080D9273287791C /* GoalPresentationTests.swift in Sources */,
 				74BF6607D82BCE87062699A2 /* HomeCalculatorTests.swift in Sources */,
 				752E4D06FFFF8808F5721B40 /* IntentWalletResolutionTests.swift in Sources */,
+				61D224BE1528C1E05538662B /* LocalBackupServiceTests.swift in Sources */,
 				9171E6F934667015EBBD15ED /* NetWorthCalculatorTests.swift in Sources */,
 				0EC98EF71E6317F82BFBF9E7 /* Phase2JPolishTests.swift in Sources */,
 				48B8FA826DACD5E752F6FCE3 /* PreMigrationBudgetCalculationCharacterizationTests.swift in Sources */,
@@ -1413,7 +1429,7 @@
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -1486,6 +1502,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Clarity Dev";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Clarity uses Face ID to keep your financial data private.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations~ipad" = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1498,7 +1516,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -1523,7 +1541,7 @@
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -1541,6 +1559,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Clarity;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Clarity uses Face ID to keep your financial data private.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations~ipad" = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1553,7 +1573,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -1591,6 +1611,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Clarity;
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Clarity uses Face ID to keep your financial data private.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations~ipad" = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1603,7 +1625,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -1683,6 +1705,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Clarity Dev";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Clarity uses Face ID to keep your financial data private.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				"INFOPLIST_KEY_UISupportedInterfaceOrientations~ipad" = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UIUserInterfaceStyle = Dark;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1695,7 +1719,7 @@
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};

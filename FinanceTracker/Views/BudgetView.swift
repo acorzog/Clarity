@@ -53,14 +53,17 @@ struct BudgetContentView: View {
             .padding(.horizontal)
 
             ScrollView {
-                switch subTab {
-                case .plan:
-                    PlanView(month: selectedMonth)
-                case .remaining:
-                    RemainingView(month: selectedMonth, layout: remainingLayout)
-                case .goals:
-                    GoalsListView()
+                Group {
+                    switch subTab {
+                    case .plan:
+                        PlanView(month: selectedMonth)
+                    case .remaining:
+                        RemainingView(month: selectedMonth, layout: remainingLayout)
+                    case .goals:
+                        GoalsListView()
+                    }
                 }
+                .readableContentWidth()
             }
             // Lets a scroll gesture drag the keyboard down interactively instead of
             // requiring the user to leave the screen just to type in another field.

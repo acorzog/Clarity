@@ -41,12 +41,13 @@ struct OverviewView: View {
 
                 switch subTab {
                 case .overview:
-                    ScrollView { OverviewSummaryView(month: selectedMonth) }
+                    ScrollView { OverviewSummaryView(month: selectedMonth).readableContentWidth() }
                 case .spending:
-                    ScrollView { SpendingBreakdownView(month: selectedMonth) }
+                    ScrollView { SpendingBreakdownView(month: selectedMonth).readableContentWidth() }
                 case .list:
                     // Owns its own List/scrolling for swipe actions — not wrapped in ScrollView.
                     EntryListView(month: selectedMonth, searchText: searchText)
+                        .readableContentWidth()
                 }
             }
             .darkScreenBackground()

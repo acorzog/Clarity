@@ -55,6 +55,7 @@ struct SharedHomeView: View {
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 24)
+                    .readableContentWidth()
                 }
             }
             .darkScreenBackground()
