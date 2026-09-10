@@ -130,6 +130,33 @@ struct CalendarView: View {
     }
 }
 
+extension CalendarView {
+    /// Combined VoiceOver label for one day cell — date + financial meaning, never relying on
+    /// color. `net == nil` means no entries at all that day; `net == 0` (non-nil) means entries
+    /// existed (e.g. a transfer-only day, or income/expense that canceled out exactly) but their
+    /// net is zero. These two cases render visually identically today (the known, deliberately
+    /// deferred zero-net-day finding — `CLARITY_OVERVIEW_ACTIVITY_UX_SPEC.md` §8/§13) but must
+    /// read differently to a VoiceOver user, which this label already has enough information to
+    /// do without any new calculation.
+    static func dayAccessibilityLabel(for day: Date, net: Decimal?, calendar: Calendar = .current) -> String {
+        let dateText = day.formatted(.dateTime.month(.wide).day())
+        guard let net else { return "\(dateText), no activity" }
+        if net == 0 { return "\(dateText), activity, net zero" }
+        if net > 0 { return "\(dateText), net income \(net.currencyFormatted)" }
+        return "\(dateText), net expense \(abs(net).currencyFormatted)"
+    }
+
+    /// Whether a day had transactions that netted to exactly zero (offsetting income/expense, or
+    /// a transfer-only day) — as opposed to no transactions at all. Both cases pass `net != 0 ==
+    /// false` and previously rendered visually identically (blank cell); this distinguishes them
+    /// so a small, non-color-only indicator (`DayCell`) can show "something happened here" without
+    /// implying an amount. Pure passthrough of the same `net` the cell already has — no new
+    /// calculation, no change to `dailyTotals`.
+    static func hasOffsettingActivity(net: Decimal?) -> Bool {
+        net == 0
+    }
+}
+
 private struct DaySelection: Identifiable {
     let date: Date
     var id: Date { date }
@@ -149,17 +176,27 @@ private struct DayCell: View {
             } label: {
                 VStack(spacing: 4) {
                     Text("\(Calendar.current.component(.day, from: day))")
-                        .font(.system(size: 14, weight: isToday ? .bold : .medium))
+                        .font(.caption.weight(isToday ? .bold : .medium))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     if let net, net != 0 {
                         Text(compactAmount(net))
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.footnote.weight(.semibold))
                             .foregroundStyle(net > 0 ? Color.emerald : Color.expenseRed)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
+                    } else if CalendarView.hasOffsettingActivity(net: net) {
+                        // Distinguishes "transactions occurred but netted to zero" from "no
+                        // activity" — both previously rendered as an identical blank cell. A
+                        // shape/presence cue (not a color), matching this file's "no fake data,
+                        // no color-only meaning" convention; see `hasOffsettingActivity`'s doc.
+                        Circle()
+                            .fill(Color.white.opacity(0.35))
+                            .frame(width: 4, height: 4)
                     } else {
-                        Text(" ").font(.system(size: 9))
+                        Text(" ").font(.footnote)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -172,8 +209,20 @@ private struct DayCell: View {
                 }
             }
             .buttonStyle(.plain)
+            // Caps Dynamic Type scaling for this fixed-height grid cell at the largest
+            // non-accessibility size — real Dynamic Type support through the normal range,
+            // without letting an accessibility text size (AX1-AX5) overflow a 52pt cell that
+            // this phase is explicitly not redesigning. See `CLARITY_OVERVIEW_ACTIVITY_UX_SPEC.md`
+            // §14/§16.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(CalendarView.dayAccessibilityLabel(for: day, net: net))
+            .accessibilityHint("Double tap to view this day's transactions")
         } else {
-            Color.clear.frame(maxWidth: .infinity).frame(height: 52)
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .accessibilityHidden(true)
         }
     }
 

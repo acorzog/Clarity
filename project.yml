@@ -28,6 +28,12 @@ targets:
           - CFBundleURLName: com.andreacorzo.FinanceTracker
             CFBundleURLSchemes:
               - financetracker
+        # Required by UICloudSharingController for the (currently feature-flagged-off, see
+        # CollaborationFeatureFlag) Shared Expenses collaboration flow. Previously present only
+        # in the checked-in Info.plist itself (not declared here), so a plain `xcodegen generate`
+        # silently dropped it on regeneration — restored here as the actual source of truth so
+        # that can't happen again.
+        CKSharingSupported: true
         # Full UILaunchScreen dict (rather than *_Generation: YES) so the system-level launch
         # screen is a solid dark background matching the app instead of default white — this is
         # what's visible for the instant before LaunchScreenView (SwiftUI) takes over.
@@ -50,6 +56,49 @@ targets:
         INFOPLIST_KEY_NSFaceIDUsageDescription: "Clarity uses Face ID to keep your financial data private."
         SWIFT_EMIT_LOC_STRINGS: YES
 
+  # Side-by-side "environment" for testing a branch without touching the installed FinanceTracker
+  # app or its data: distinct bundle ID, display name, URL scheme, and App Group (so it gets its
+  # own empty SwiftData store — see SharedModelContainer.appGroupID). Doesn't embed the widget
+  # extension: a widget's bundle ID must be prefixed by its host app's, so it can't be embedded
+  # unmodified in a second app target.
+  FinanceTrackerDev:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: FinanceTracker
+    entitlements:
+      path: FinanceTracker/FinanceTracker-Dev.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.andreacorzo.FinanceTracker.dev
+    info:
+      path: FinanceTracker/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: com.andreacorzo.FinanceTracker.dev
+            CFBundleURLSchemes:
+              - financetrackerdev
+        CKSharingSupported: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.andreacorzo.FinanceTracker.dev
+        PRODUCT_NAME: FinanceTrackerDev
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_KEY_CFBundleDisplayName: Clarity Dev
+        INFOPLIST_KEY_UIUserInterfaceStyle: Dark
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_NSFaceIDUsageDescription: "Clarity uses Face ID to keep your financial data private."
+        SWIFT_EMIT_LOC_STRINGS: YES
+
   FinanceTrackerWidgets:
     type: app-extension
     platform: iOS
@@ -59,6 +108,10 @@ targets:
       - path: FinanceTracker/Models
       - path: FinanceTracker/Views/Theme.swift
       - path: FinanceTracker/Services/SharedModelContainer.swift
+      # Design-system tokens only (not Components/) — BudgetGaugeWidgetView needs the shared
+      # GaugeThreshold/Color tokens so it can't silently drift from RemainingGauge's coloring
+      # rule again, matching how Theme.swift is already shared with this target.
+      - path: FinanceTracker/DesignSystem/Tokens
     entitlements:
       path: FinanceTrackerWidgets/FinanceTrackerWidgets.entitlements
       properties:

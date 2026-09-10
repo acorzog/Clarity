@@ -5,71 +5,41 @@ import Charts
 struct InsightsView: View {
     let month: Date
 
+    @ObservedObject private var settings = BudgetSettingsStore.shared
     @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     @Query private var allBudgets: [Budget]
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
 
-    private var monthExpenses: [Entry] {
-        allEntries.inMonth(month).filter { $0.type == .expense }
-    }
-
-    private var totalPlannedExpenses: Decimal {
-        let (m, y) = month.monthYearComponents
-        return allBudgets
-            .filter { $0.month == m && $0.year == y && !$0.category.isIncome }
-            .reduce(Decimal(0)) { $0 + $1.monthlyLimit }
+    /// The same shared calculation Remaining uses — see `BudgetCalculator.periodSpendingSummary`.
+    /// Per the Phase 1 product decision, "actual" here is scoped to the configurable budget
+    /// cycle (not the plain calendar month this view used before), so Insights and Remaining can
+    /// no longer disagree about which entries count as "this period."
+    private var summary: PeriodSpendingSummary {
+        BudgetCalculator.periodSpendingSummary(
+            month: month,
+            entries: allEntries,
+            budgets: allBudgets,
+            headCategories: headCategories,
+            settings: BudgetCalculationSettings(from: settings),
+            respectHiddenCategories: true
+        )
     }
 
     private var headComparisons: [HeadComparison] {
-        let (m, y) = month.monthYearComponents
-
-        return headCategories.compactMap { head in
-            let categoryIDs = Set(head.categories.filter { !$0.isIncome && !$0.isArchived }.map(\.id))
-            guard !categoryIDs.isEmpty else { return nil }
-
-            let planned = allBudgets
-                .filter { $0.month == m && $0.year == y && categoryIDs.contains($0.category.id) }
-                .reduce(Decimal(0)) { $0 + $1.monthlyLimit }
-            let actual = monthExpenses
-                .filter { $0.category.map { categoryIDs.contains($0.id) } == true }
-                .reduce(Decimal(0)) { $0 + $1.amount }
-
-            guard planned > 0 || actual > 0 else { return nil }
-            return HeadComparison(id: head.id, name: head.name, planned: planned, actual: actual)
-        }
+        summary.byHeadCategory.map { HeadComparison(id: $0.headCategory.id, name: $0.headCategory.name, planned: $0.planned, actual: $0.actual) }
     }
 
-    private var dailySpend: [DailySpend] {
-        let calendar = Calendar.current
-        guard let range = calendar.range(of: .day, in: .month, for: month) else { return [] }
-        let daysInMonth = range.count
-        let perDayPace = daysInMonth > 0 ? totalPlannedExpenses / Decimal(daysInMonth) : 0
-
-        let lastDataDay: Int
-        if calendar.isDate(month, equalTo: .now, toGranularity: .month) {
-            lastDataDay = calendar.component(.day, from: .now)
-        } else if month < .startOfMonth() {
-            lastDataDay = daysInMonth
-        } else {
-            lastDataDay = 0
-        }
-
-        var cumulative: Decimal = 0
-        return (1...daysInMonth).map { day in
-            var actual: Decimal?
-            if day <= lastDataDay {
-                let dayTotal = monthExpenses
-                    .filter { calendar.component(.day, from: $0.date) == day }
-                    .reduce(Decimal(0)) { $0 + $1.amount }
-                cumulative += dayTotal
-                actual = cumulative
-            }
-            return DailySpend(day: day, actual: actual, onPace: perDayPace * Decimal(day))
-        }
+    private var dailySpend: [DailyPacePoint] {
+        BudgetCalculator.spendingPace(
+            month: month,
+            entries: allEntries,
+            settings: BudgetCalculationSettings(from: settings),
+            totalPlanned: summary.totalBudgeted
+        )
     }
 
     private var hasData: Bool {
-        !headComparisons.isEmpty || totalPlannedExpenses > 0 || !monthExpenses.isEmpty
+        !headComparisons.isEmpty || summary.totalBudgeted > 0 || summary.totalSpent > 0
     }
 
     var body: some View {
@@ -82,11 +52,41 @@ struct InsightsView: View {
                 )
             } else {
                 PlannedVsActualCard(data: headComparisons)
-                SpendPaceCard(data: dailySpend, totalBudget: totalPlannedExpenses)
+                SpendPaceCard(data: dailySpend, totalBudget: summary.totalBudgeted)
             }
         }
         .padding(.horizontal)
         .padding(.bottom, 24)
+    }
+}
+
+extension InsightsView {
+    /// Combined VoiceOver summary for the Planned vs. Actual grouped-bar chart — previously
+    /// silent to VoiceOver, matching the exact gap Phase 2F/2F-B already fixed for the donut/trend
+    /// charts elsewhere in the app (Phase 2J). Reads already-computed `planned`/`actual` values,
+    /// never recalculates them.
+    static func plannedVsActualAccessibilitySummary(data: [(name: String, planned: Decimal, actual: Decimal)]) -> String {
+        guard !data.isEmpty else {
+            return "Planned versus actual spending. No budgeted or spent categories this month yet."
+        }
+        let lines = data.map { "\($0.name): planned \($0.planned.currencyFormatted), actual \($0.actual.currencyFormatted)." }
+        return (["Planned versus actual spending, by category."] + lines).joined(separator: " ")
+    }
+
+    /// Combined VoiceOver summary for the Spending Pace dual-line chart — same rationale as
+    /// above. Reports only the latest data point (today's position), matching what the chart's
+    /// two lines visually converge on; the full daily series isn't read point-by-point since
+    /// `onPace`'s straight-line values carry no individual meaning outside that comparison.
+    static func spendPaceAccessibilitySummary(totalBudget: Decimal, data: [DailyPacePoint]) -> String {
+        guard totalBudget > 0 else {
+            return "Spending pace. No budget set for this period."
+        }
+        let headline = "Spending pace against a budget of \(totalBudget.currencyFormatted)."
+        guard let latest = data.last(where: { $0.actual != nil }), let actual = latest.actual else {
+            return "\(headline) No spending recorded yet."
+        }
+        let comparison = actual > latest.onPace ? "ahead of pace" : "on pace or under"
+        return "\(headline) Day \(latest.day): spent \(actual.currencyFormatted), \(comparison)."
     }
 }
 
@@ -95,13 +95,6 @@ private struct HeadComparison: Identifiable {
     let name: String
     let planned: Decimal
     let actual: Decimal
-}
-
-private struct DailySpend: Identifiable {
-    var id: Int { day }
-    let day: Int
-    let actual: Decimal?
-    let onPace: Decimal
 }
 
 private struct PlannedVsActualCard: View {
@@ -153,6 +146,12 @@ private struct PlannedVsActualCard: View {
                     }
                     .chartLegend(position: .bottom, spacing: 8)
                     .frame(width: max(300, CGFloat(data.count) * 90), height: 200)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(
+                        InsightsView.plannedVsActualAccessibilitySummary(
+                            data: data.map { (name: $0.name, planned: $0.planned, actual: $0.actual) }
+                        )
+                    )
                 }
             }
         }
@@ -162,7 +161,7 @@ private struct PlannedVsActualCard: View {
 }
 
 private struct SpendPaceCard: View {
-    let data: [DailySpend]
+    let data: [DailyPacePoint]
     let totalBudget: Decimal
 
     var body: some View {
@@ -221,6 +220,8 @@ private struct SpendPaceCard: View {
                 }
                 .chartLegend(position: .bottom, spacing: 8)
                 .frame(height: 200)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(InsightsView.spendPaceAccessibilitySummary(totalBudget: totalBudget, data: data))
             }
         }
         .padding(20)

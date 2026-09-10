@@ -79,17 +79,12 @@ struct PlanView: View {
         newlyCreatedCategoryID = category.persistentModelID
     }
 
-    private var totalPlannedIncome: Decimal {
-        visibleIncomeCategories.reduce(Decimal(0)) { $0 + allBudgets.amount(for: $1, month: month) }
+    /// Planning-time totals from the shared calculation layer — see `BudgetCalculator.
+    /// plannedBudgetTotals`. Never reads `Entry`; `totalPlannedExpenses`/`leftToBudget` here are
+    /// a different concept from Remaining's actual-spending-based "Available to Spend."
+    private var plannedTotals: PlannedBudgetTotals {
+        BudgetCalculator.plannedBudgetTotals(month: month, budgets: allBudgets, headCategories: headCategories)
     }
-
-    private var totalPlannedExpenses: Decimal {
-        expenseHeadCategories
-            .flatMap { visibleExpenseCategories(for: $0) }
-            .reduce(Decimal(0)) { $0 + allBudgets.amount(for: $1, month: month) }
-    }
-
-    private var leftToBudget: Decimal { totalPlannedIncome - totalPlannedExpenses }
 
     private func expandedBinding(for key: PlanGroupKey) -> Binding<Bool> {
         Binding(
@@ -115,9 +110,10 @@ struct PlanView: View {
                         .font(.title2)
                         .foregroundStyle(LinearGradient.emeraldSky)
                 }
+                .accessibilityLabel("Add category group")
             }
 
-            PlanSummaryCard(totalPlanned: totalPlannedExpenses, leftToBudget: leftToBudget)
+            PlanMetricsRow(totalPlanned: plannedTotals.totalPlannedExpenses, leftToBudget: plannedTotals.leftToBudget)
 
             CategoryGroupCard(title: "Income", isExpanded: expandedBinding(for: .income)) {
                 VStack(spacing: 0) {
@@ -213,10 +209,17 @@ private struct CategoryGroupCard<Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // Expanded/collapsed state was previously conveyed only by the chevron's rotation —
+            // invisible to VoiceOver. `.accessibilityValue` announces the state; `.combine` reads
+            // title + state as one stop instead of two separate, order-ambiguous ones (Phase 2J).
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(title) category group")
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint("Double tap to \(isExpanded ? "collapse" : "expand")")
 
             if isExpanded {
                 content
-                    .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+                    .surface(.primary, radius: ClarityRadius.medium, padding: 0)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -255,6 +258,9 @@ private struct HiddenCategoriesSection: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+                .accessibilityHint("Double tap to \(isExpanded ? "collapse" : "expand")")
 
                 if isExpanded {
                     ForEach(categories) { category in
@@ -280,7 +286,12 @@ private struct HiddenCategoriesSection: View {
     }
 }
 
-private struct PlanSummaryCard: View {
+/// Allocate's top-of-screen summary — Planned Expenses / Available to Allocate. Deliberately
+/// borderless (no `.surface()`/card wrapper), mirroring `OverviewSummaryView.SummaryMetricsRow`'s
+/// established Tier-1 treatment exactly (Phase 2H-C): two numbers with a self-evident
+/// relationship don't need a bounding box. Formerly `PlanSummaryCard` — renamed since it's no
+/// longer a card.
+private struct PlanMetricsRow: View {
     let totalPlanned: Decimal
     let leftToBudget: Decimal
 
@@ -288,26 +299,10 @@ private struct PlanSummaryCard: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Planned Expenses")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
-                Text(totalPlanned.currencyFormatted)
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
-            }
+            FinancialMetric(title: "Planned Expenses", value: totalPlanned.currencyFormatted, color: .textPrimary)
             Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
-                Text("Left to Budget")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.5))
-                Text(leftToBudget.currencyFormatted)
-                    .font(.title3.bold())
-                    .foregroundStyle(leftColor)
-            }
+            FinancialMetric(title: "Available to Allocate", value: leftToBudget.currencyFormatted, color: leftColor, alignment: .trailing)
         }
-        .padding(20)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24))
     }
 }
 

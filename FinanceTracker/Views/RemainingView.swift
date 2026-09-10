@@ -24,132 +24,86 @@ struct RemainingView: View {
     @Query private var allBudgets: [Budget]
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
 
-    private var periodEntries: [Entry] {
-        allEntries.inBudgetPeriod(month, startDay: settings.cycleStartDay)
-    }
-
-    private var monthExpenses: [Entry] {
-        periodEntries.filter { $0.type == .expense }
-    }
-
-    private var monthTransfers: [Entry] {
-        periodEntries.filter { $0.type == .transfer }
-    }
-
-    private func entries(for category: Category) -> [Entry] {
-        monthExpenses.filter { $0.category === category }
-    }
-
-    private func spent(for category: Category) -> Decimal {
-        entries(for: category).reduce(Decimal(0)) { $0 + $1.amount }
-    }
-
-    private func budgeted(for category: Category) -> Decimal {
-        allBudgets.amount(for: category, month: month)
+    /// The shared "Available to Spend" calculation — see `BudgetCalculator.periodSpendingSummary`.
+    /// Single source of truth also consumed by `BudgetGaugeWidget`, so the two can no longer
+    /// disagree. `respectHiddenCategories: true` matches Plan's existing visible-only behavior.
+    private var summary: PeriodSpendingSummary {
+        BudgetCalculator.periodSpendingSummary(
+            month: month,
+            entries: allEntries,
+            budgets: allBudgets,
+            headCategories: headCategories,
+            settings: BudgetCalculationSettings(from: settings),
+            respectHiddenCategories: true
+        )
     }
 
     private func expenseCategories(for head: HeadCategory) -> [Category] {
         head.categories.filter { !$0.isIncome && !$0.isArchived }.sorted { $0.name < $1.name }
     }
 
-    private var headSummaries: [HeadRemainingSummary] {
-        headCategories.compactMap { head in
-            let categories = expenseCategories(for: head)
-            guard !categories.isEmpty else { return nil }
-            let budget = categories.reduce(Decimal(0)) { $0 + budgeted(for: $1) }
-            let spentTotal = categories.reduce(Decimal(0)) { $0 + spent(for: $1) }
-            guard budget > 0 || spentTotal > 0 else { return nil }
-            return HeadRemainingSummary(id: head.id, name: head.name, colorHex: head.colorHex, budgeted: budget, spent: spentTotal)
-        }
+    private func headSummary(for head: HeadCategory, in summary: PeriodSpendingSummary) -> HeadRemainingSummary? {
+        summary.byHeadCategory.first { $0.headCategory === head }
+            .map { HeadRemainingSummary(id: head.id, name: head.name, colorHex: head.colorHex, budgeted: $0.planned, spent: $0.actual) }
     }
 
-    private var totalBudgeted: Decimal {
-        headCategories.flatMap { expenseCategories(for: $0) }.reduce(Decimal(0)) { $0 + budgeted(for: $1) }
+    /// The budget-eligible entries behind a category's `spent` figure, for the drill-down
+    /// (`CategoryEntriesDetailView`) — kept consistent with the total it explains, so the detail
+    /// list never shows an entry the total above it didn't actually count.
+    private func entries(for category: Category) -> [Entry] {
+        allEntries
+            .inBudgetPeriod(month, startDay: settings.cycleStartDay)
+            .budgetEligible
+            .filter { $0.type == .expense && $0.category === category }
     }
 
-    private var totalIncome: Decimal {
-        periodEntries.filter { $0.type == .income }.reduce(Decimal(0)) { $0 + $1.amount }
-    }
-
-    /// Expenses whose category has no monthly limit set (or no category at all) — folded into
-    /// an "Other Expenses" bucket when `settings.includeUnplannedAsOtherExpenses` is on.
-    private var otherExpenses: [Entry] {
-        monthExpenses.filter { entry in
-            guard let category = entry.category else { return true }
-            return budgeted(for: category) == 0
-        }
-    }
-
-    private var otherExpensesTotal: Decimal {
-        otherExpenses.reduce(Decimal(0)) { $0 + $1.amount }
-    }
-
-    private var savingsTransfersTotal: Decimal {
-        monthTransfers.filter { $0.destinationWallet?.type == .savings }.reduce(Decimal(0)) { $0 + $1.amount }
-    }
-
-    private var debtTransfersTotal: Decimal {
-        monthTransfers.filter { $0.destinationWallet?.type == .debt }.reduce(Decimal(0)) { $0 + $1.amount }
-    }
-
-    private var otherRows: [OtherSpendingRow] {
+    private func otherRows(for summary: PeriodSpendingSummary) -> [OtherSpendingRow] {
         var rows: [OtherSpendingRow] = []
-        if settings.includeUnplannedAsOtherExpenses && otherExpensesTotal > 0 {
-            rows.append(OtherSpendingRow(title: "Other Expenses", amount: otherExpensesTotal, icon: "questionmark.circle.fill"))
+        if settings.includeUnplannedAsOtherExpenses && summary.otherExpensesTotal > 0 {
+            rows.append(OtherSpendingRow(title: "Other Expenses", amount: summary.otherExpensesTotal, icon: "questionmark.circle.fill"))
         }
-        if settings.includeSavingsTransfers && savingsTransfersTotal > 0 {
-            rows.append(OtherSpendingRow(title: "Savings Transfers", amount: savingsTransfersTotal, icon: "banknote.fill"))
+        if settings.includeSavingsTransfers && summary.savingsTransfersTotal > 0 {
+            rows.append(OtherSpendingRow(title: "Savings Transfers", amount: summary.savingsTransfersTotal, icon: "banknote.fill"))
         }
-        if settings.includeDebtTransfers && debtTransfersTotal > 0 {
-            rows.append(OtherSpendingRow(title: "Debt Payments", amount: debtTransfersTotal, icon: "creditcard.fill"))
+        if settings.includeDebtTransfers && summary.debtTransfersTotal > 0 {
+            rows.append(OtherSpendingRow(title: "Debt Payments", amount: summary.debtTransfersTotal, icon: "creditcard.fill"))
         }
         return rows
     }
 
-    private var totalSpent: Decimal {
-        var total = monthExpenses.reduce(Decimal(0)) { $0 + $1.amount }
-        if !settings.includeUnplannedAsOtherExpenses {
-            total -= otherExpensesTotal
-        }
-        if settings.includeSavingsTransfers {
-            total += savingsTransfersTotal
-        }
-        if settings.includeDebtTransfers {
-            total += debtTransfersTotal
-        }
-        return total
-    }
-
-    /// What "Left to Spend" is measured against. A manual monthly budget goal (set in Budget
-    /// Settings) takes priority when set; otherwise income actually received this period is real
-    /// money available to spend, so it takes priority over the expense-category budget total —
-    /// otherwise a wallet full of income shows as unavailable just because it wasn't assigned to
-    /// a specific expense category. Falls back to the budgeted total for periods with no income
-    /// tracked at all, so pure budget-only users see the same behavior as before.
-    private var totalAvailable: Decimal {
-        if settings.manualMonthlyBudget > 0 { return settings.manualMonthlyBudget }
-        return totalIncome > 0 ? totalIncome : totalBudgeted
-    }
-
     var body: some View {
-        if totalAvailable == 0 && totalSpent == 0 {
+        // Computed once per body evaluation (rather than re-read as a computed property from
+        // every row) since it aggregates every entry/budget/category in a single pass.
+        let summary = summary
+        let spent: (Category) -> Decimal = { category in
+            summary.byCategory.first { $0.category === category }?.actual ?? 0
+        }
+        let budgeted: (Category) -> Decimal = { category in
+            summary.byCategory.first { $0.category === category }?.planned ?? 0
+        }
+
+        if summary.totalAvailable == 0 && summary.totalSpent == 0 {
             EmptyStateView(
                 icon: "gauge.with.needle",
                 title: "No Budget Set",
-                message: "Set monthly limits in the Plan tab to see what's left to spend."
+                message: "Set monthly limits in Allocate to see what's available to spend."
             )
         } else {
             VStack(spacing: 24) {
-                RemainingGauge(totalAvailable: totalAvailable, totalSpent: totalSpent, breakdown: headSummaries)
+                RemainingGauge(
+                    totalAvailable: summary.totalAvailable,
+                    totalSpent: summary.totalSpent,
+                    breakdown: headCategories.compactMap { headSummary(for: $0, in: summary) }
+                )
 
                 VStack(spacing: 16) {
                     ForEach(headCategories) { head in
                         let categories = expenseCategories(for: head)
-                        if let summary = headSummaries.first(where: { $0.id == head.id }) {
+                        if let headSummary = headSummary(for: head, in: summary) {
                             switch layout {
                             case .list:
                                 HeadRemainingSection(
-                                    head: summary,
+                                    head: headSummary,
                                     categories: categories,
                                     spentFor: spent,
                                     budgetedFor: budgeted,
@@ -157,7 +111,7 @@ struct RemainingView: View {
                                 )
                             case .compact:
                                 HeadRemainingGridSection(
-                                    head: summary,
+                                    head: headSummary,
                                     categories: categories,
                                     spentFor: spent,
                                     budgetedFor: budgeted,
@@ -167,6 +121,7 @@ struct RemainingView: View {
                         }
                     }
 
+                    let otherRows = otherRows(for: summary)
                     if !otherRows.isEmpty {
                         OtherSpendingCard(rows: otherRows)
                     }
@@ -175,6 +130,26 @@ struct RemainingView: View {
             .padding(.horizontal)
             .padding(.bottom, 24)
         }
+    }
+}
+
+extension RemainingView {
+    /// Combined VoiceOver summary for `RemainingGauge` — overall status first, then each head
+    /// category's remaining amount, in the same order the gauge's `breakdown` is given (matching
+    /// the reading-order convention already established for the donut/trend charts). `breakdown`
+    /// is already-computed `left` values (`budgeted - spent`), never recalculated here.
+    static func gaugeAccessibilitySummary(
+        totalAvailable: Decimal,
+        totalSpent: Decimal,
+        breakdown: [(name: String, left: Decimal)]
+    ) -> String {
+        let totalLeft = totalAvailable - totalSpent
+        let headline = totalLeft >= 0
+            ? "\(totalLeft.currencyFormatted) available to spend."
+            : "\(abs(totalLeft).currencyFormatted) over available."
+        guard !breakdown.isEmpty else { return headline }
+        let lines = breakdown.map { "\($0.name): \($0.left.currencyFormatted) left." }
+        return ([headline] + lines).joined(separator: " ")
     }
 }
 
@@ -214,7 +189,7 @@ private struct OtherSpendingCard: View {
                     }
                 }
             }
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+            .surface(.primary, radius: ClarityRadius.medium, padding: 0)
         }
     }
 }
@@ -245,10 +220,7 @@ private struct RemainingGauge: View {
 
     private var arcColor: Color {
         guard totalAvailable > 0 else { return .white.opacity(0.3) }
-        let fraction = (totalSpent / totalAvailable).doubleValue
-        if fraction >= 1 { return .expenseRed }
-        if fraction >= 0.85 { return Color(red: 0.98, green: 0.68, blue: 0.16) }
-        return .emerald
+        return GaugeThreshold.color(forProgress: (totalSpent / totalAvailable).doubleValue)
     }
 
     var body: some View {
@@ -272,7 +244,7 @@ private struct RemainingGauge: View {
             }
 
             VStack(spacing: 6) {
-                Text("Left to Spend")
+                Text("Available to Spend")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.5))
                 Text(totalLeft.currencyFormatted)
@@ -285,6 +257,19 @@ private struct RemainingGauge: View {
         }
         .frame(height: labelRadius * 2 + 50)
         .frame(maxWidth: .infinity)
+        // The ring itself, the center text, and every `HeadArcLabel` floating around it are all
+        // individually silent/confusing to VoiceOver (an untitled arc; absolutely-positioned
+        // labels with no reading order) — matches the exact gap Phase 2F already fixed for the
+        // donut chart. One composed summary replaces all of it, read in a sensible order (overall
+        // status, then each head category), rather than exposing the drawing itself.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            RemainingView.gaugeAccessibilitySummary(
+                totalAvailable: totalAvailable,
+                totalSpent: totalSpent,
+                breakdown: breakdown.map { (name: $0.name, left: $0.left) }
+            )
+        )
     }
 
     private func angleDegrees(index: Int, total: Int) -> Double {
@@ -353,7 +338,7 @@ private struct HeadRemainingSection: View {
                     }
                 }
             }
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+            .surface(.primary, radius: ClarityRadius.medium, padding: 0)
         }
     }
 }
@@ -398,8 +383,7 @@ private struct HeadRemainingGridSection: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(16)
-            .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+            .surface(.primary, radius: ClarityRadius.medium, padding: ClaritySpacing.lg)
         }
     }
 }

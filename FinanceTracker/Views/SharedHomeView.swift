@@ -67,6 +67,7 @@ struct SharedHomeView: View {
                             .font(.title2)
                             .foregroundStyle(LinearGradient.emeraldSky)
                     }
+                    .accessibilityLabel("New shared event")
                 }
             }
         }

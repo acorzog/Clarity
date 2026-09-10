@@ -7,8 +7,14 @@ private struct ToolItem: Identifiable {
     let isAvailable: Bool
 }
 
+/// The "More" tab — a container for Accounts plus the existing utility screens. Formerly
+/// "Tools"; per the Phase 2B-2.2 navigation restructure, Accounts (the former standalone
+/// "Wallets" tab, per `CLARITY_PRODUCT_ARCHITECTURE.md` §13's Wallet→Account UX terminology
+/// decision) moved here rather than staying a top-level tab. The Swift type name is left as
+/// `ToolsView` — it's an internal identifier, not user-facing — to avoid an unrelated rename.
 struct ToolsView: View {
     private let items: [ToolItem] = [
+        ToolItem(title: "Accounts", icon: "wallet.pass.fill", isAvailable: true),
         ToolItem(title: "Categories", icon: "square.grid.2x2.fill", isAvailable: true),
         ToolItem(title: "Export CSV", icon: "square.and.arrow.up.fill", isAvailable: true),
         ToolItem(title: "Widgets", icon: "apps.iphone", isAvailable: true),
@@ -23,7 +29,7 @@ struct ToolsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                GradientHeader(title: "Tools")
+                GradientHeader(title: "More")
                     .padding(.top, 8)
 
                 ScrollView {
@@ -48,6 +54,10 @@ struct ToolsView: View {
     @ViewBuilder
     private func destination(for item: ToolItem) -> some View {
         switch item.title {
+        case "Accounts":
+            // `WalletsContentView`, not `WalletsView` — avoids nesting a second
+            // `NavigationStack` inside this one. See `WalletsView`'s doc comment.
+            WalletsContentView()
         case "Categories":
             CategoriesView()
         case "Export CSV":
@@ -68,33 +78,33 @@ private struct ToolCard: View {
     let item: ToolItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(item.isAvailable ? 0.08 : 0.05))
-                Image(systemName: item.icon)
-                    .font(.title2)
-                    .foregroundStyle(item.isAvailable ? AnyShapeStyle(LinearGradient.emeraldSky) : AnyShapeStyle(Color.white.opacity(0.3)))
-            }
-            .frame(width: 48, height: 48)
+        SectionCard(padding: ClaritySpacing.lg) {
+            VStack(alignment: .leading, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.white.opacity(item.isAvailable ? 0.08 : 0.05))
+                    Image(systemName: item.icon)
+                        .font(.title2)
+                        .foregroundStyle(item.isAvailable ? AnyShapeStyle(LinearGradient.emeraldSky) : AnyShapeStyle(Color.white.opacity(0.3)))
+                }
+                .frame(width: 48, height: 48)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
 
-                if !item.isAvailable {
-                    Text("Coming soon")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.4))
+                    if !item.isAvailable {
+                        Text("Coming soon")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
                 }
             }
+            // `.leading` centers vertically by default (it's leading + center), so the icon/text
+            // block sits centered in the card's height instead of pinned to the top edge.
+            .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
         }
-        .padding(16)
-        // `.leading` centers vertically by default (it's leading + center), so the icon/text
-        // block sits centered in the card's height instead of pinned to the top edge.
-        .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))
     }
 }
 

@@ -88,17 +88,7 @@ struct RecordPaymentView: View {
                 .listRowBackground(Color.white.opacity(0.05))
 
                 Section("Amount") {
-                    HStack {
-                        Text(Locale.current.currencySymbol ?? "$")
-                            .foregroundStyle(.white.opacity(0.6))
-                        TextField("0", text: $amountText)
-                            .keyboardType(.decimalPad)
-                            .foregroundStyle(.white)
-                            .onChange(of: amountText) { _, newValue in
-                                let filtered = newValue.sanitizedDecimalInput()
-                                if filtered != newValue { amountText = filtered }
-                            }
-                    }
+                    AmountField(text: $amountText, style: .compact)
                     if let amountValidationMessage {
                         Text(amountValidationMessage)
                             .font(.caption)
@@ -131,7 +121,7 @@ struct RecordPaymentView: View {
 
                     if addToTransactions {
                         SelectionRow(
-                            title: "Wallet",
+                            title: "Account",
                             iconName: selectedWallet?.icon,
                             iconColorHex: selectedWallet?.colorHex,
                             valueName: selectedWallet?.name
@@ -250,34 +240,3 @@ struct RecordPaymentView: View {
     }
 }
 
-private struct SelectionRow: View {
-    let title: String
-    let iconName: String?
-    let iconColorHex: String?
-    let valueName: String?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                    .foregroundStyle(.white)
-                Spacer()
-                if let valueName {
-                    if let iconName {
-                        Image(systemName: iconName)
-                            .foregroundStyle(iconColorHex.map { Color(hex: $0) } ?? .white)
-                    }
-                    Text(valueName)
-                        .foregroundStyle(.white.opacity(0.7))
-                } else {
-                    Text("Select")
-                        .foregroundStyle(.white.opacity(0.4))
-                }
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.3))
-            }
-        }
-    }
-}

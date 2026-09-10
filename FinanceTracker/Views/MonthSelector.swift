@@ -10,6 +10,7 @@ struct MonthSelector: View {
             } label: {
                 Image(systemName: "chevron.left")
             }
+            .accessibilityLabel("Previous month")
 
             Spacer()
 
@@ -24,6 +25,7 @@ struct MonthSelector: View {
             } label: {
                 Image(systemName: "chevron.right")
             }
+            .accessibilityLabel("Next month")
         }
         .foregroundStyle(.white.opacity(0.6))
     }

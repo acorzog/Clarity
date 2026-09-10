@@ -3,6 +3,12 @@ import SwiftUI
 /// A manual swipe-to-reveal-delete gesture for rows that live in a custom card/VStack layout
 /// rather than a `List` — SwiftUI's `.swipeActions` modifier only works on List rows, so this
 /// fills the gap for card-based lists like Plan's budget rows.
+///
+/// The `DragGesture` this relies on has no VoiceOver equivalent, so deletion is also exposed as
+/// an explicit accessibility action (Phase 2N-E, `CLARITY_GOALS_QA_REPORT.md` §8) — invoking the
+/// exact same `onDelete` closure the revealed trash button already calls, guarded by the same
+/// `canDelete` condition the gesture itself already checks. Shared here rather than duplicated
+/// per call site, since every existing use (Plan, Shared, Goals) benefits identically.
 struct SwipeToDeleteRow<Content: View>: View {
     let canDelete: Bool
     let onDelete: () -> Void
@@ -64,12 +70,23 @@ struct SwipeToDeleteRow<Content: View>: View {
                             }
                         }
                 )
+                .accessibilityAction(named: "Delete", performAccessibilityDelete)
         }
         .clipShape(Rectangle())
     }
 
     private func delete() {
         withAnimation(.easeOut(duration: 0.2)) { offset = 0 }
+        onDelete()
+    }
+
+    /// The VoiceOver-triggered counterpart to `delete()` — no reveal offset to reset (VoiceOver
+    /// never drags), so it calls `onDelete` directly, guarded by the same `canDelete` condition
+    /// the drag gesture itself already checks. A named method rather than an inline closure so
+    /// `SwipeToDeleteRowTests` can invoke exactly what the accessibility action invokes, without
+    /// needing a SwiftUI view-inspection library this project doesn't have.
+    func performAccessibilityDelete() {
+        guard canDelete else { return }
         onDelete()
     }
 }

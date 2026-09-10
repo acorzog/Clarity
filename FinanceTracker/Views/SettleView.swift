@@ -25,6 +25,7 @@ struct SettleView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
+                    .accessibilityElement(children: .combine)
                 }
                 .listRowBackground(Color.clear)
 
@@ -45,6 +46,7 @@ struct SettleView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.white.opacity(0.3))
                                 }
+                                .accessibilityElement(children: .combine)
                             }
                         }
                     }

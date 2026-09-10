@@ -29,11 +29,7 @@ struct WalletEditorView: View {
         "lock.fill", "gift.fill", "briefcase.fill", "house.fill", "cart.fill"
     ]
 
-    private let colorChoices = [
-        "#F59E0B", "#F97316", "#EF4444", "#EC4899", "#8B5CF6",
-        "#6366F1", "#3B82F6", "#0EA5E9", "#14B8A6", "#10B981",
-        "#84CC16", "#6B7280"
-    ]
+    private let colorChoices = ClarityColorPalette.hexValues
 
     private var isEditing: Bool { wallet != nil }
 
@@ -65,7 +61,7 @@ struct WalletEditorView: View {
             }
 
             Section("Name") {
-                TextField("Wallet name", text: $name)
+                TextField("Account name", text: $name)
                     .foregroundStyle(.white)
             }
             .listRowBackground(Color.white.opacity(0.05))
@@ -186,10 +182,10 @@ struct WalletEditorView: View {
             Section {
                 Toggle("Include in Net Worth", isOn: $includeInNetWorth)
                     .tint(.emerald)
-                Toggle("Default Wallet", isOn: $isDefault)
+                Toggle("Default Account", isOn: $isDefault)
                     .tint(.emerald)
             } footer: {
-                Text("The default wallet is pre-selected when creating transactions.")
+                Text("The default account is pre-selected when creating transactions.")
                     .foregroundStyle(.white.opacity(0.4))
             }
             .listRowBackground(Color.white.opacity(0.05))
@@ -201,7 +197,7 @@ struct WalletEditorView: View {
                             wallet.isArchived = false
                             dismiss()
                         } label: {
-                            Text("Restore Wallet")
+                            Text("Restore Account")
                                 .frame(maxWidth: .infinity)
                                 .foregroundStyle(Color.emerald)
                         }
@@ -210,7 +206,7 @@ struct WalletEditorView: View {
                             wallet.isArchived = true
                             dismiss()
                         } label: {
-                            Text("Archive Wallet")
+                            Text("Archive Account")
                                 .frame(maxWidth: .infinity)
                                 .foregroundStyle(.white.opacity(0.8))
                         }
@@ -218,8 +214,8 @@ struct WalletEditorView: View {
                 } footer: {
                     Text(
                         wallet.isArchived
-                            ? "Restoring brings this wallet back to the wallet list and makes it selectable for new transactions again."
-                            : "Archived wallets are hidden from the wallet list and no longer selectable for new transactions — their balance and history are kept, and can be restored any time."
+                            ? "Restoring brings this account back to the account list and makes it selectable for new transactions again."
+                            : "Archived accounts are hidden from the account list and no longer selectable for new transactions — their balance and history are kept, and can be restored any time."
                     )
                     .foregroundStyle(.white.opacity(0.4))
                 }
@@ -233,7 +229,7 @@ struct WalletEditorView: View {
                             showingCannotRemoveAlert = true
                         }
                     } label: {
-                        Text("Remove Wallet")
+                        Text("Remove Account")
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -242,7 +238,7 @@ struct WalletEditorView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Color.appBackground.ignoresSafeArea())
-        .navigationTitle(isEditing ? "Editing Wallet" : "New Wallet")
+        .navigationTitle(isEditing ? "Editing Account" : "New Account")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -265,7 +261,7 @@ struct WalletEditorView: View {
                 WalletTransactionsView(wallet: wallet)
             }
         }
-        .alert("Remove this wallet?", isPresented: $showingRemoveAlert) {
+        .alert("Remove this account?", isPresented: $showingRemoveAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Remove", role: .destructive) {
                 if let wallet {
@@ -276,10 +272,10 @@ struct WalletEditorView: View {
         } message: {
             Text("This can't be undone.")
         }
-        .alert("Can't Remove Wallet", isPresented: $showingCannotRemoveAlert) {
+        .alert("Can't Remove Account", isPresented: $showingCannotRemoveAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("This wallet has transactions on it, or is the destination of a transfer from another wallet. Archive it instead, or remove those transactions first.")
+            Text("This account has transactions on it, or is the destination of a transfer from another account. Archive it instead, or remove those transactions first.")
         }
     }
 

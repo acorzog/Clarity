@@ -26,10 +26,7 @@ struct NewSharedEventView: View {
         "ticket.fill", "suitcase.fill", "person.3.fill"
     ]
 
-    private let colorChoices = [
-        "#6366F1", "#3B82F6", "#0EA5E9", "#14B8A6", "#10B981",
-        "#F59E0B", "#F97316", "#EF4444", "#EC4899", "#8B5CF6"
-    ]
+    private let colorChoices = ClarityColorPalette.hexValues
 
     private var isValid: Bool {
         !title.trimmingCharacters(in: .whitespaces).isEmpty
@@ -60,6 +57,10 @@ struct NewSharedEventView: View {
                                     )
                             }
                             .buttonStyle(.plain)
+                            // Selection was previously conveyed only by a fill-color swap — no
+                            // signal at all to VoiceOver (Phase 2J).
+                            .accessibilityLabel("Icon \(iconChoices.firstIndex(of: candidate).map { $0 + 1 } ?? 0) of \(iconChoices.count)")
+                            .accessibilityAddTraits(icon == candidate ? [.isSelected] : [])
                         }
                     }
                     .padding(.vertical, 4)
@@ -80,6 +81,8 @@ struct NewSharedEventView: View {
                                         }
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel("Color \(colorChoices.firstIndex(of: hex).map { $0 + 1 } ?? 0) of \(colorChoices.count)")
+                                .accessibilityAddTraits(colorHex == hex ? [.isSelected] : [])
                             }
                         }
                         .padding(.vertical, 4)

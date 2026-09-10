@@ -31,18 +31,12 @@ struct SetWalletGoalView: View {
                 .padding(.horizontal)
                 .padding(.top, 32)
 
-                Button {
+                Button("Save") {
                     let trimmed = amountText.trimmingCharacters(in: .whitespaces)
                     wallet.goalAmount = trimmed.isEmpty ? nil : Decimal(decimalInput: trimmed)
                     dismiss()
-                } label: {
-                    Text("Save")
-                        .font(.headline)
-                        .foregroundStyle(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 16))
                 }
+                .buttonStyle(.clarityPrimary)
                 .padding(.horizontal)
 
                 Spacer()
