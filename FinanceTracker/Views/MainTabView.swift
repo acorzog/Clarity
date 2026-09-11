@@ -47,16 +47,27 @@ enum MainTab: CaseIterable, Hashable {
 
 struct MainTabView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: MainTab = .home
+    /// Bumped whenever the calendar day changes — see the `.id(currentDay)` calls below. Several
+    /// screens (`OverviewView`/`BudgetView`'s `selectedMonth`) default to "today"/"this month" in
+    /// a plain `@State` initializer, which SwiftUI only evaluates once; without something forcing
+    /// a fresh view identity, they'd keep showing the day the app happened to launch on for as
+    /// long as it stays running, silently filtering out anything dated "today" once the real day
+    /// (or month) moves on. `HomeView.month` already avoids this by being a computed property
+    /// instead of `@State` — this fixes the same class of bug for every other screen at once,
+    /// rather than tracking down and patching each frozen `@State` individually.
+    @State private var currentDay = Calendar.current.startOfDay(for: .now)
 
     var body: some View {
         Group {
             if horizontalSizeClass == .regular {
-                AdaptiveSidebarView(selectedTab: $selectedTab)
+                AdaptiveSidebarView(selectedTab: $selectedTab, currentDay: currentDay)
             } else {
                 TabView(selection: $selectedTab) {
                     ForEach(MainTab.allCases, id: \.self) { tab in
                         destination(for: tab)
+                            .id(currentDay)
                             .tabItem { Label(tab.title, systemImage: tab.icon) }
                             .tag(tab)
                     }
@@ -65,6 +76,22 @@ struct MainTabView: View {
         }
         .tint(.emerald)
         .preferredColorScheme(.dark)
+        // The system posts this at midnight (and on timezone/manual date changes) while the app
+        // is actually running — the common case, since the day usually rolls over overnight while
+        // the app sits foregrounded or suspended-in-recents rather than fully backgrounded.
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in
+            refreshCurrentDay()
+        }
+        // Fallback for when the app was backgrounded across midnight and the notification above
+        // never reached it: re-check on every return to foreground.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active { refreshCurrentDay() }
+        }
+    }
+
+    private func refreshCurrentDay() {
+        let today = Calendar.current.startOfDay(for: .now)
+        if today != currentDay { currentDay = today }
     }
 
     /// Shared by both the compact `TabView` and the regular-width sidebar's detail column, so
@@ -92,6 +119,7 @@ struct MainTabView: View {
 /// `NavigationStack`, which nests cleanly inside a split view's detail column.
 private struct AdaptiveSidebarView: View {
     @Binding var selectedTab: MainTab
+    let currentDay: Date
 
     /// `List`'s non-optional `Binding<SelectionValue>` selection initializer is unavailable on
     /// iOS — only the optional-selection one is. `selectedTab` itself stays non-optional (every
@@ -111,6 +139,7 @@ private struct AdaptiveSidebarView: View {
             .listStyle(.sidebar)
         } detail: {
             MainTabView.destination(for: selectedTab, selectedTab: $selectedTab)
+                .id(currentDay)
         }
         .navigationSplitViewStyle(.balanced)
     }

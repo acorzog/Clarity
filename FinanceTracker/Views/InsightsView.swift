@@ -25,8 +25,14 @@ struct InsightsView: View {
         )
     }
 
+    /// Most-planned-first so the categories most worth a glance land in the initially visible
+    /// area of the horizontally-scrolling chart, instead of in whatever order `HeadCategory.
+    /// sortOrder` happens to put them — with many categories, that order could bury a
+    /// heavily-planned one off the right edge, behind a lightly-planned or unplanned one.
     private var headComparisons: [HeadComparison] {
-        summary.byHeadCategory.map { HeadComparison(id: $0.headCategory.id, name: $0.headCategory.name, planned: $0.planned, actual: $0.actual) }
+        summary.byHeadCategory
+            .map { HeadComparison(id: $0.headCategory.id, name: $0.headCategory.name, planned: $0.planned, actual: $0.actual) }
+            .sorted { $0.planned > $1.planned }
     }
 
     private var dailySpend: [DailyPacePoint] {
