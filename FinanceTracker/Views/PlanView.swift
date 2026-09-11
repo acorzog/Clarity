@@ -387,6 +387,11 @@ private struct AddCategoryRow: View {
                         .focused($focused)
                         .submitLabel(.done)
                         .onSubmit(commit)
+                    Button(action: cancel) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.white.opacity(0.4))
+                    }
+                    .accessibilityLabel("Cancel")
                     Button(action: commit) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(Color.emerald)
@@ -425,6 +430,12 @@ private struct AddCategoryRow: View {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
         onCreate(trimmed)
+        name = ""
+        isEditing = false
+    }
+
+    private func cancel() {
+        focused = false
         name = ""
         isEditing = false
     }

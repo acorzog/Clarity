@@ -65,9 +65,12 @@ struct BudgetContentView: View {
                 }
                 .readableContentWidth()
             }
-            // Lets a scroll gesture drag the keyboard down interactively instead of
-            // requiring the user to leave the screen just to type in another field.
-            .scrollDismissesKeyboard(.interactively)
+            // `.interactively` (the previous choice) ties the first scroll gesture to dragging
+            // the keyboard down proportionally to the drag distance — with the amount/category
+            // fields on this screen keeping the keyboard up often, that made scrolling feel stuck
+            // until the keyboard was fully out of the way. `.immediately` dismisses on the first
+            // touch instead, so the same gesture scrolls the list right away.
+            .scrollDismissesKeyboard(.immediately)
         }
         .darkScreenBackground()
         .toolbar {
