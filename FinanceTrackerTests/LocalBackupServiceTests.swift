@@ -133,6 +133,27 @@ final class LocalBackupServiceTests: XCTestCase {
         XCTAssertFalse(headCategories.contains { $0.name == "Stale" })
     }
 
+    func testEraseAllDataRemovesEveryModel() throws {
+        let context = TestSupport.makeInMemoryContext()
+        makeFixture(in: context)
+
+        try LocalBackupService.eraseAllData(in: context)
+
+        XCTAssertEqual(count(HeadCategory.self, in: context), 0)
+        XCTAssertEqual(count(FinanceTracker.Category.self, in: context), 0)
+        XCTAssertEqual(count(Wallet.self, in: context), 0)
+        XCTAssertEqual(count(Entry.self, in: context), 0)
+        XCTAssertEqual(count(Budget.self, in: context), 0)
+        XCTAssertEqual(count(Goal.self, in: context), 0)
+        XCTAssertEqual(count(GoalContribution.self, in: context), 0)
+        XCTAssertEqual(count(Person.self, in: context), 0)
+        XCTAssertEqual(count(SharedEvent.self, in: context), 0)
+        XCTAssertEqual(count(SharedExpense.self, in: context), 0)
+        XCTAssertEqual(count(SharedExpenseParticipant.self, in: context), 0)
+        XCTAssertEqual(count(Settlement.self, in: context), 0)
+        XCTAssertEqual(count(EventParticipant.self, in: context), 0)
+    }
+
     func testExportedDataIsStableJSON() throws {
         let context = TestSupport.makeInMemoryContext()
         makeFixture(in: context)

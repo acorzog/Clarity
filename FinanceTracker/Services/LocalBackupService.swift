@@ -331,7 +331,7 @@ enum LocalBackupService {
         decoder.dateDecodingStrategy = .iso8601
         let snapshot = try decoder.decode(DataSnapshot.self, from: data)
 
-        try deleteAllData(in: context)
+        try eraseAllData(in: context)
 
         let headCategories = snapshot.headCategories.map {
             HeadCategory(name: $0.name, icon: $0.icon, colorHex: $0.colorHex, sortOrder: $0.sortOrder)
@@ -467,12 +467,16 @@ enum LocalBackupService {
         Dictionary(uniqueKeysWithValues: objects.enumerated().map { (ObjectIdentifier($1), $0) })
     }
 
+    /// Deletes every object of every model type — `restore`'s first step before rebuilding from a
+    /// snapshot, and also exposed directly for `BackupRestoreView`'s "Erase All Data" action
+    /// (wipe with nothing to restore afterward, e.g. to start over clean on a device).
+    ///
     /// Deletion order matters only where a delete rule can block it — the single `.deny` rule in
     /// the schema is `Wallet.entries` (see `Wallet.swift`), so `Entry` must go before `Wallet`.
     /// Every other relationship in the schema is `.cascade`/`.nullify`, which never blocks a
     /// delete, so the rest of this order is just "children before the parents that named them,"
     /// not a hard requirement.
-    private static func deleteAllData(in context: ModelContext) throws {
+    static func eraseAllData(in context: ModelContext) throws {
         try deleteAll(EventParticipant.self, in: context)
         try deleteAll(Settlement.self, in: context)
         try deleteAll(SharedExpenseParticipant.self, in: context)

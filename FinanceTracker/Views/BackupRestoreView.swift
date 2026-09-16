@@ -19,6 +19,10 @@ struct BackupRestoreView: View {
     @State private var restoreErrorMessage: String?
     @State private var showingRestoreError = false
     @State private var didRestore = false
+    @State private var showingEraseConfirmation = false
+    @State private var eraseErrorMessage: String?
+    @State private var showingEraseError = false
+    @State private var didErase = false
 
     var body: some View {
         Form {
@@ -52,6 +56,19 @@ struct BackupRestoreView: View {
                 Text("Replaces all data currently on this device with the contents of the backup file. This can't be undone.")
             }
             .listRowBackground(Color.white.opacity(0.05))
+
+            Section {
+                Button(role: .destructive) {
+                    showingEraseConfirmation = true
+                } label: {
+                    Label("Erase All Data", systemImage: "trash")
+                }
+            } header: {
+                Text("Erase")
+            } footer: {
+                Text("Permanently deletes everything on this device — accounts, transactions, budgets, goals, shared events. This can't be undone; consider creating a backup first.")
+            }
+            .listRowBackground(Color.white.opacity(0.05))
         }
         .scrollContentBackground(.hidden)
         .background(Color.appBackground.ignoresSafeArea())
@@ -80,6 +97,22 @@ struct BackupRestoreView: View {
             Button("OK") { dismiss() }
         } message: {
             Text("Your data has been replaced with the backup's contents.")
+        }
+        .alert("Erase All Data?", isPresented: $showingEraseConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Erase Everything", role: .destructive) { eraseAllData() }
+        } message: {
+            Text("This permanently deletes all data on this device and can't be undone.")
+        }
+        .alert("Couldn't Erase Data", isPresented: $showingEraseError) {
+            Button("OK") {}
+        } message: {
+            Text(eraseErrorMessage ?? "")
+        }
+        .alert("Data Erased", isPresented: $didErase) {
+            Button("OK") { dismiss() }
+        } message: {
+            Text("All data on this device has been deleted.")
         }
     }
 
@@ -119,6 +152,16 @@ struct BackupRestoreView: View {
             pendingImportData = nil
             restoreErrorMessage = error.localizedDescription
             showingRestoreError = true
+        }
+    }
+
+    private func eraseAllData() {
+        do {
+            try LocalBackupService.eraseAllData(in: modelContext)
+            didErase = true
+        } catch {
+            eraseErrorMessage = error.localizedDescription
+            showingEraseError = true
         }
     }
 }
