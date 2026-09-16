@@ -13,6 +13,10 @@ struct AddTransactionView: View {
     /// Wallet a new entry defaults to (ignored when editing). Falls back to the user's
     /// default wallet, then the first available one, when nil.
     var initialWallet: Wallet?
+    /// Category a new entry defaults to (ignored when editing an existing entry). Lets callers
+    /// like Remaining's category drill-down (`CategoryEntriesDetailView`) pre-fill the category
+    /// the user was already looking at, instead of falling back to Settings' configured default.
+    var initialCategory: Category?
     /// Called with the created/edited Entry right before this view dismisses itself — mirrors
     /// `CategoryEditorView.onSave`'s exact precedent. Lets a caller like Goals' Add Money flow
     /// (Phase 2N-C1) capture the resulting Entry to link a `GoalContribution` to it, without this
@@ -373,7 +377,7 @@ struct AddTransactionView: View {
             selectedWallet = initialWallet ?? wallets.first(where: \.isDefault) ?? wallets.first
             entryType = initialType
             date = initialDate
-            selectedCategory = defaultCategory(for: initialType)
+            selectedCategory = initialCategory ?? defaultCategory(for: initialType)
             amountFieldFocused = true
         }
     }
@@ -422,6 +426,13 @@ struct AddTransactionView: View {
             modelContext.insert(newEntry)
             savedEntry = newEntry
         }
+        // Explicit save rather than relying on SwiftData's lazy autosave: `RootView` calls
+        // `modelContext.rollback()` on every foreground transition and every cross-process store
+        // change (needed to pick up entries the widget/Siri/a Shortcut write in their own
+        // process) — without this, an edit made here could still be sitting unsaved when one of
+        // those rollbacks fires (e.g. switching back to the app right after running a Shortcut is
+        // itself a foreground transition) and get silently discarded.
+        try? modelContext.save()
         onSave?(savedEntry)
         dismiss()
     }

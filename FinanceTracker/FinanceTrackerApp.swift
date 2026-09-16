@@ -8,6 +8,9 @@ struct FinanceTrackerApp: App {
     private let container: ModelContainer
 
     init() {
+        if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
+            SharedModelContainer.resetStoreForUITesting()
+        }
         container = SharedModelContainer.make()
         SeedData.seedIfNeeded(context: container.mainContext)
         CategorizationService.modelContext = container.mainContext

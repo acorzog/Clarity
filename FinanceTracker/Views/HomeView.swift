@@ -14,6 +14,7 @@ struct HomeView: View {
     /// limitation rather than silently worked around.
     @Binding var selectedTab: MainTab
 
+    @Environment(\.modelContext) private var modelContext
     @ObservedObject private var budgetSettings = BudgetSettingsStore.shared
     @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     @Query private var allBudgets: [Budget]
@@ -126,6 +127,7 @@ struct HomeView: View {
                 .padding(.bottom, 24)
                 .readableContentWidth()
             }
+            .refreshable { await DataSyncService.refresh(modelContext) }
             .darkScreenBackground()
         }
     }

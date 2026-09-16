@@ -13,6 +13,8 @@ private struct ToolItem: Identifiable {
 /// decision) moved here rather than staying a top-level tab. The Swift type name is left as
 /// `ToolsView` — it's an internal identifier, not user-facing — to avoid an unrelated rename.
 struct ToolsView: View {
+    @Environment(\.modelContext) private var modelContext
+
     private let items: [ToolItem] = [
         ToolItem(title: "Accounts", icon: "wallet.pass.fill", isAvailable: true),
         ToolItem(title: "Categories", icon: "square.grid.2x2.fill", isAvailable: true),
@@ -48,6 +50,7 @@ struct ToolsView: View {
                     .padding(.bottom, 24)
                     .readableContentWidth()
                 }
+                .refreshable { await DataSyncService.refresh(modelContext) }
             }
             .darkScreenBackground()
         }

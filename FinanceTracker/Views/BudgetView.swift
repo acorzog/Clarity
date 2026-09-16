@@ -22,6 +22,7 @@ struct BudgetView: View {
 /// former third sub-tab) now reached via the "Insights" toolbar action, presented as a sheet.
 /// Goals is a `ComingSoonView` placeholder; its engine is not built (Phase 2H-B, Task 4).
 struct BudgetContentView: View {
+    @Environment(\.modelContext) private var modelContext
     @ObservedObject private var settings = BudgetSettingsStore.shared
     @State private var subTab: BudgetSubTab = .plan
     @State private var selectedMonth = Date.startOfMonth()
@@ -71,6 +72,7 @@ struct BudgetContentView: View {
             // until the keyboard was fully out of the way. `.immediately` dismisses on the first
             // touch instead, so the same gesture scrolls the list right away.
             .scrollDismissesKeyboard(.immediately)
+            .refreshable { await DataSyncService.refresh(modelContext) }
         }
         .darkScreenBackground()
         .toolbar {

@@ -92,6 +92,7 @@ struct WalletsContentView: View {
                         .font(.title2)
                         .foregroundStyle(LinearGradient.emeraldSky)
                 }
+                .accessibilityLabel("Reorder accounts")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -101,6 +102,7 @@ struct WalletsContentView: View {
                         .font(.title2)
                         .foregroundStyle(LinearGradient.emeraldSky)
                 }
+                .accessibilityLabel("Transfer between accounts")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -110,6 +112,7 @@ struct WalletsContentView: View {
                         .font(.title2)
                         .foregroundStyle(LinearGradient.emeraldSky)
                 }
+                .accessibilityLabel("Add account")
             }
         }
         .sheet(isPresented: $showingNewWallet) {
@@ -234,6 +237,9 @@ private struct WalletRow: View {
         }
         .padding(20)
         .opacity(dimmed ? 0.5 : 1)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(wallet.name) account")
+        .accessibilityValue(wallet.balance.currencyFormatted)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))
     }
 }

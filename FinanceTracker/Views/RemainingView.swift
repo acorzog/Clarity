@@ -107,7 +107,8 @@ struct RemainingView: View {
                                     categories: categories,
                                     spentFor: spent,
                                     budgetedFor: budgeted,
-                                    entriesFor: entries
+                                    entriesFor: entries,
+                                    month: month
                                 )
                             case .compact:
                                 HeadRemainingGridSection(
@@ -115,7 +116,8 @@ struct RemainingView: View {
                                     categories: categories,
                                     spentFor: spent,
                                     budgetedFor: budgeted,
-                                    entriesFor: entries
+                                    entriesFor: entries,
+                                    month: month
                                 )
                             }
                         }
@@ -304,6 +306,7 @@ private struct HeadRemainingSection: View {
     let spentFor: (Category) -> Decimal
     let budgetedFor: (Category) -> Decimal
     let entriesFor: (Category) -> [Entry]
+    let month: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -323,7 +326,7 @@ private struct HeadRemainingSection: View {
             VStack(spacing: 0) {
                 ForEach(categories) { category in
                     NavigationLink {
-                        CategoryEntriesDetailView(title: category.name, entries: entriesFor(category))
+                        CategoryEntriesDetailView(title: category.name, entries: entriesFor(category), category: category, month: month)
                     } label: {
                         CategoryProgressRow(
                             name: category.name,
@@ -351,6 +354,7 @@ private struct HeadRemainingGridSection: View {
     let spentFor: (Category) -> Decimal
     let budgetedFor: (Category) -> Decimal
     let entriesFor: (Category) -> [Entry]
+    let month: Date
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -381,7 +385,7 @@ private struct HeadRemainingGridSection: View {
             LazyVGrid(columns: columns, spacing: 18) {
                 ForEach(categories) { category in
                     NavigationLink {
-                        CategoryEntriesDetailView(title: category.name, entries: entriesFor(category))
+                        CategoryEntriesDetailView(title: category.name, entries: entriesFor(category), category: category, month: month)
                     } label: {
                         CategoryGridCell(
                             category: category,

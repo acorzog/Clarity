@@ -59,9 +59,10 @@ enum TestSupport {
         monthlyLimit: Decimal,
         month: Int,
         year: Int,
-        isHidden: Bool = false
+        isHidden: Bool = false,
+        isFixed: Bool = false
     ) -> Budget {
-        Budget(category: category, monthlyLimit: monthlyLimit, month: month, year: year, isHidden: isHidden)
+        Budget(category: category, monthlyLimit: monthlyLimit, month: month, year: year, isHidden: isHidden, isFixed: isFixed)
     }
 
     static func makeEntry(

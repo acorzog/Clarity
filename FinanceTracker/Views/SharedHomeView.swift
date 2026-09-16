@@ -57,6 +57,7 @@ struct SharedHomeView: View {
                     .padding(.bottom, 24)
                     .readableContentWidth()
                 }
+                .refreshable { await DataSyncService.refresh(modelContext) }
             }
             .darkScreenBackground()
             .toolbar {

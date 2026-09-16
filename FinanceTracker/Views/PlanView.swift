@@ -62,6 +62,31 @@ struct PlanView: View {
             let (m, y) = month.monthYearComponents
             modelContext.insert(Budget(category: category, monthlyLimit: amount, month: m, year: y))
         }
+        // Explicit save rather than relying on SwiftData's lazy autosave — see
+        // `AddTransactionView.save()`'s identical comment: `RootView` calls `modelContext.
+        // rollback()` on every foreground transition and cross-process store change, which
+        // silently discards an unsaved insert/mutation. Without this, a Fixed budget set here
+        // could vanish (or its carry-forward could silently stop) before the user ever leaves
+        // this screen.
+        try? modelContext.save()
+    }
+
+    /// Marking Fixed when there's no entry yet for `month` locks in whatever amount is currently
+    /// shown (this month's own if it exists, otherwise a carried-forward one) as a real row, so
+    /// it becomes the anchor later months carry forward from — see `Array<Budget>.amount(for:
+    /// month:)`.
+    private func setFixed(_ isFixed: Bool, for category: Category) {
+        if let existing = allBudgets.budget(for: category, month: month) {
+            existing.isFixed = isFixed
+        } else {
+            let (m, y) = month.monthYearComponents
+            modelContext.insert(Budget(
+                category: category, monthlyLimit: allBudgets.amount(for: category, month: month),
+                month: m, year: y, isFixed: isFixed
+            ))
+        }
+        // See `setAmount`'s comment — same rollback hazard applies here.
+        try? modelContext.save()
     }
 
     private func setHidden(_ hidden: Bool, for category: Category) {
@@ -71,6 +96,8 @@ struct PlanView: View {
             let (m, y) = month.monthYearComponents
             modelContext.insert(Budget(category: category, monthlyLimit: 0, month: m, year: y, isHidden: true))
         }
+        // See `setAmount`'s comment — same rollback hazard applies here.
+        try? modelContext.save()
     }
 
     private func addCategory(name: String, to head: HeadCategory, isIncome: Bool) {
@@ -121,8 +148,10 @@ struct PlanView: View {
                         PlannedAmountRow(
                             category: category,
                             amount: allBudgets.amount(for: category, month: month),
+                            isFixed: allBudgets.isFixed(for: category, month: month),
                             onCommit: { setAmount($0, for: category) },
                             onHide: { setHidden(true, for: category) },
+                            onToggleFixed: { setFixed(!allBudgets.isFixed(for: category, month: month), for: category) },
                             autoFocus: category.persistentModelID == newlyCreatedCategoryID,
                             onAutoFocusConsumed: { newlyCreatedCategoryID = nil }
                         )
@@ -151,8 +180,10 @@ struct PlanView: View {
                             PlannedAmountRow(
                                 category: category,
                                 amount: allBudgets.amount(for: category, month: month),
+                                isFixed: allBudgets.isFixed(for: category, month: month),
                                 onCommit: { setAmount($0, for: category) },
                                 onHide: { setHidden(true, for: category) },
+                                onToggleFixed: { setFixed(!allBudgets.isFixed(for: category, month: month), for: category) },
                                 autoFocus: category.persistentModelID == newlyCreatedCategoryID,
                                 onAutoFocusConsumed: { newlyCreatedCategoryID = nil }
                             )
@@ -309,61 +340,165 @@ private struct PlanMetricsRow: View {
 private struct PlannedAmountRow: View {
     let category: Category
     let amount: Decimal
+    var isFixed: Bool = false
     let onCommit: (Decimal) -> Void
     var onHide: () -> Void = {}
+    /// Swipe-right on this row (see `SwipeToDeleteRow`'s leading action) flips Fixed/Variable
+    /// directly — replaces the old tap-into-`CategoryBudgetSettingsView` sheet flow, which added
+    /// an extra screen for what's really a one-step toggle.
+    var onToggleFixed: () -> Void = {}
     var autoFocus = false
     var onAutoFocusConsumed: () -> Void = {}
 
-    @State private var text = ""
-    @FocusState private var focused: Bool
+    @State private var showingAmountEntry = false
 
     var body: some View {
-        SwipeToDeleteRow(canDelete: true, onDelete: onHide, icon: "eye.slash.fill", tint: Color.white.opacity(0.15)) {
+        SwipeToDeleteRow(
+            canDelete: true,
+            onDelete: onHide,
+            icon: "eye.slash.fill",
+            tint: Color.white.opacity(0.15),
+            canLeadingAction: true,
+            onLeadingAction: onToggleFixed,
+            leadingIcon: isFixed ? "pin.slash.fill" : "pin.fill",
+            leadingTint: isFixed ? Color.white.opacity(0.25) : Color.emerald,
+            leadingAccessibilityActionName: isFixed ? "Mark Variable" : "Mark Fixed"
+        ) {
             rowContent
         }
         .onAppear {
-            text = amount.editableText()
             if autoFocus {
-                focused = true
+                showingAmountEntry = true
                 onAutoFocusConsumed()
             }
         }
-        .onChange(of: amount) { _, newValue in
-            guard !focused else { return }
-            text = newValue.editableText()
-        }
-        .onChange(of: text) { _, newValue in
-            let filtered = newValue.sanitizedDecimalInput()
-            if filtered != newValue {
-                text = filtered
-                return
-            }
-            onCommit(Decimal(decimalInput: filtered) ?? 0)
+        .sheet(isPresented: $showingAmountEntry) {
+            AmountEntrySheet(category: category, currentAmount: amount, onSave: onCommit)
         }
     }
 
     private var rowContent: some View {
         HStack(spacing: 12) {
-            CategoryIconView(category: category, size: 28)
+            HStack(spacing: 8) {
+                CategoryIconView(category: category, size: 28)
 
-            Text(category.name)
-                .foregroundStyle(.white)
+                Text(category.name)
+                    .foregroundStyle(.white)
+
+                // Small at-a-glance marker for a category whose amount carries forward
+                // automatically — swipe right on this row to toggle it.
+                if isFixed {
+                    Image(systemName: "repeat")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(category.name)
+            .accessibilityValue(isFixed ? "Fixed" : "Variable")
+            .accessibilityHint("Swipe right, or use the rotor, to toggle whether this amount carries over to next month")
 
             Spacer()
 
-            HStack(spacing: 2) {
-                Text(Locale.current.currencySymbol ?? "$")
-                    .foregroundStyle(.white.opacity(0.4))
-                TextField("0", text: $text)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
+            // A clearly-tappable pill rather than a cramped inline field — see
+            // `AmountEntrySheet`, which opens on tap with the value large and legible, and needs
+            // an explicit Save before anything changes (no more committing on every keystroke).
+            Button {
+                showingAmountEntry = true
+            } label: {
+                Text(amount.currencyFormatted)
                     .foregroundStyle(.white)
-                    .frame(width: 70)
-                    .focused($focused)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.08), in: Capsule())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(category.name) planned amount")
+            .accessibilityValue(amount.currencyFormatted)
+            .accessibilityHint("Double tap to change")
         }
         .padding(.horizontal)
         .padding(.vertical, 12)
+    }
+}
+
+/// Opened by tapping a category's amount pill in Plan → Allocate — a large, legible amount field
+/// with an explicit Save action, instead of the small inline field this replaced (which committed
+/// silently on every keystroke). Also what a newly-created category auto-opens into, so it's
+/// immediately clear where to type its starting amount.
+struct AmountEntrySheet: View {
+    let category: Category
+    let currentAmount: Decimal
+    let onSave: (Decimal) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    init(category: Category, currentAmount: Decimal, onSave: @escaping (Decimal) -> Void) {
+        self.category = category
+        self.currentAmount = currentAmount
+        self.onSave = onSave
+        _text = State(initialValue: currentAmount == 0 ? "" : currentAmount.editableText())
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                HStack(spacing: 10) {
+                    CategoryIconView(category: category, size: 32)
+                    Text(category.name)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
+                }
+
+                HStack(spacing: 4) {
+                    Text(Locale.current.currencySymbol ?? "$")
+                        .font(.system(size: 36, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                    TextField("0", text: $text)
+                        .keyboardType(.decimalPad)
+                        .font(.system(size: 44, weight: .bold))
+                        .foregroundStyle(.white)
+                        .fixedSize()
+                        .focused($focused)
+                }
+                .frame(maxWidth: .infinity)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 16)
+            .padding(.horizontal)
+            .background(Color.appBackground.ignoresSafeArea())
+            .navigationTitle("Amount")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        onSave(Decimal(decimalInput: text) ?? 0)
+                        dismiss()
+                    } label: {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(Color.emerald)
+                    }
+                    .accessibilityLabel("Save amount")
+                }
+            }
+        }
+        .presentationDetents([.height(260)])
+        .presentationDragIndicator(.visible)
+        .onAppear { focused = true }
+        .onChange(of: text) { _, newValue in
+            let filtered = newValue.sanitizedDecimalInput()
+            if filtered != newValue { text = filtered }
+        }
     }
 }
 

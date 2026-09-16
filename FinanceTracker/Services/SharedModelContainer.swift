@@ -33,4 +33,19 @@ enum SharedModelContainer {
             fatalError("Failed to create shared ModelContainer: \(error)")
         }
     }
+
+    /// Deletes the on-disk store (and its `-wal`/`-shm` sidecar files) before `make()` creates the
+    /// container — called from `FinanceTrackerApp.init()` only when launched with the
+    /// `-uiTestReset` argument (`FinanceTrackerUITests/UITestSupport.swift`), so every UI test run
+    /// starts from `SeedData`'s clean default categories/wallet instead of accumulating whatever
+    /// wallets/transactions a previous run left behind. Never runs in a normal launch — the
+    /// argument is only ever set by the UI test bundle itself — so this can't touch a real
+    /// device's actual data.
+    static func resetStoreForUITesting() {
+        guard let groupURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID) else { return }
+        let storeURL = groupURL.appendingPathComponent("FinanceTracker.sqlite")
+        for suffix in ["", "-wal", "-shm"] {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: storeURL.path + suffix))
+        }
+    }
 }
