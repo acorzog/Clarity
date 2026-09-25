@@ -19,9 +19,9 @@ final class TabNavigationUITests: XCTestCase {
         let home = tabBar.buttons["Home"]
         let overview = tabBar.buttons["Overview"]
         let plan = tabBar.buttons["Plan"]
-        let shared = tabBar.buttons["Shared"]
+        let wallets = tabBar.buttons["Wallets"]
         let more = tabBar.buttons["More"]
-        for button in [home, overview, plan, shared, more] {
+        for button in [home, overview, plan, wallets, more] {
             XCTAssertTrue(button.exists, "\(button) should be present in the tab bar")
         }
 
@@ -35,17 +35,20 @@ final class TabNavigationUITests: XCTestCase {
         plan.tap()
         XCTAssertTrue(plan.isSelected)
         XCTAssertTrue(app.staticTexts["Plan"].waitForExistence(timeout: 8), "Plan's own header should render")
-        // Allocate is the default sub-tab every time Plan is opened.
-        XCTAssertTrue(app.buttons["Allocate"].exists)
+        // Remaining is the default sub-tab every time Plan is opened — confirmed by its own
+        // empty-state title rather than just the segmented control's "Allocate" button existing,
+        // since that button is present regardless of which segment is actually selected.
+        XCTAssertTrue(app.buttons["Remaining"].exists)
+        XCTAssertTrue(app.staticTexts["No Budget Set"].waitForExistence(timeout: 8), "Remaining's own empty state should render by default on a fresh launch")
 
-        shared.tap()
-        XCTAssertTrue(shared.isSelected)
-        XCTAssertTrue(app.staticTexts["Shared"].waitForExistence(timeout: 8), "Shared's own header should render")
+        wallets.tap()
+        XCTAssertTrue(wallets.isSelected)
+        XCTAssertTrue(app.staticTexts["Accounts"].waitForExistence(timeout: 8), "Wallets' own header should render")
 
         more.tap()
         XCTAssertTrue(more.isSelected)
         XCTAssertTrue(app.staticTexts["More"].waitForExistence(timeout: 8), "More's own header should render")
-        XCTAssertTrue(app.staticTexts["Accounts"].exists, "More should list Accounts among its tools")
+        XCTAssertTrue(app.staticTexts["Shared"].exists, "More should list Shared among its tools")
 
         home.tap()
         XCTAssertTrue(home.isSelected, "Should be able to navigate back to Home after visiting every other tab")

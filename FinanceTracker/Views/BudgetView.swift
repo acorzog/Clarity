@@ -24,7 +24,7 @@ struct BudgetView: View {
 struct BudgetContentView: View {
     @Environment(\.modelContext) private var modelContext
     @ObservedObject private var settings = BudgetSettingsStore.shared
-    @State private var subTab: BudgetSubTab = .plan
+    @State private var subTab: BudgetSubTab = .remaining
     @State private var selectedMonth = Date.startOfMonth()
     @State private var showingSettings = false
     @State private var showingInsights = false

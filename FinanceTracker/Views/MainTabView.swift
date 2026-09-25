@@ -10,26 +10,25 @@ import SwiftUI
 /// `CLARITY_PRODUCT_ARCHITECTURE.md`'s explicit "Shared remains first-class, primary-tab"
 /// decision).
 ///
-/// This is the Phase 2B-2.2 navigation restructure's target shape —
-/// `CLARITY_PRODUCT_ARCHITECTURE.md` §3/§4: **Home / Overview / Plan / Shared / More**, replacing
-/// the interim Phase 2B-2.1 shape (Home / Budget / Wallets / Shared / Tools). Overview is
-/// reinstated as its own top-level tab (unchanged internally — its existing Overview/Spending/
-/// List sub-tabs are preserved as-is); Budget's tab becomes Plan; Wallets is no longer a top-level
-/// tab — its UI (relabeled "Accounts") moved under More; Tools' tab becomes More, now also hosting
-/// Accounts; Shared is unchanged.
+/// This is the Phase 2B-2.2 navigation restructure's target shape, since revised: **Home /
+/// Overview / Plan / Wallets / More**. Overview is reinstated as its own top-level tab (unchanged
+/// internally — its existing Overview/Spending/List sub-tabs are preserved as-is); Budget's tab
+/// becomes Plan; Tools' tab becomes More. Wallets (formerly "Accounts", relabeled back per this
+/// revision) returns to being a top-level tab instead of living under More; Shared — not yet
+/// fully developed — moved under More in its place.
 ///
 /// **Phase 2H-B revision:** Plan no longer opens a Budget/Goals/Forecast launcher
 /// (`PlanContainerView`) — it opens directly into the Allocate/Remaining/Goals workspace
 /// (`BudgetView`). See `BudgetView`'s doc comment.
 enum MainTab: CaseIterable, Hashable {
-    case home, overview, plan, shared, more
+    case home, overview, plan, wallets, more
 
     var title: String {
         switch self {
         case .home: "Home"
         case .overview: "Overview"
         case .plan: "Plan"
-        case .shared: "Shared"
+        case .wallets: "Wallets"
         case .more: "More"
         }
     }
@@ -39,7 +38,7 @@ enum MainTab: CaseIterable, Hashable {
         case .home: "house.fill"
         case .overview: "chart.pie.fill"
         case .plan: "chart.bar.fill"
-        case .shared: "person.2.fill"
+        case .wallets: "wallet.bifold.fill"
         case .more: "ellipsis.circle.fill"
         }
     }
@@ -102,7 +101,7 @@ struct MainTabView: View {
         case .home: HomeView(selectedTab: selectedTab)
         case .overview: OverviewView()
         case .plan: BudgetView()
-        case .shared: SharedHomeView()
+        case .wallets: WalletsView()
         case .more: ToolsView()
         }
     }

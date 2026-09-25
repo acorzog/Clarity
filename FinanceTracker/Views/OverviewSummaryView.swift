@@ -56,8 +56,12 @@ struct OverviewSummaryView: View {
     @ViewBuilder
     private func cardView(for card: OverviewCard) -> some View {
         switch card {
+        case .explainMonth:
+            ExplainMyMonthCardView(month: month)
         case .insights:
             SpendingInsightsCardView(month: month)
+        case .spendingHealth:
+            SpendingHealthCardView(month: month)
         case .summary:
             SummaryMetricsRow(income: income, expenses: expenses)
         case .trends:
@@ -246,12 +250,117 @@ private struct SummaryMetricsRow: View {
     }
 }
 
+/// Which categories are progressing well vs. approaching/over their budget this period, per
+/// `OverviewCalculator.categorySpendingHealth`. Categories with no budget set are left out by the
+/// calculator itself — this view only renders whatever it's handed, never decides that.
+private struct SpendingHealthCardView: View {
+    let month: Date
+
+    @ObservedObject private var budgetSettings = BudgetSettingsStore.shared
+    @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query private var allBudgets: [Budget]
+    @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
+
+    private var rows: [CategorySpendingHealth] {
+        OverviewCalculator.categorySpendingHealth(
+            month: month, entries: allEntries, budgets: allBudgets, headCategories: headCategories,
+            settings: BudgetCalculationSettings(from: budgetSettings)
+        )
+    }
+
+    /// The budget-eligible entries behind a category's `spent` figure, for the drill-down
+    /// (`CategoryEntriesDetailView`) — mirrors `RemainingView.entries(for:)` exactly, so the
+    /// detail list this opens never shows an entry the total above it didn't actually count.
+    private func entries(for category: Category) -> [Entry] {
+        allEntries
+            .inBudgetPeriod(month, startDay: budgetSettings.cycleStartDay)
+            .budgetEligible
+            .filter { $0.type == .expense && $0.category === category }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ClaritySpacing.md) {
+            Text("Spending Health")
+                .font(.sectionTitle)
+                .foregroundStyle(.textSecondary)
+
+            if rows.isEmpty {
+                Text("Set category budgets in Plan to see your spending health here")
+                    .font(.caption)
+                    .foregroundStyle(.textTertiary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(rows) { row in
+                        NavigationLink {
+                            CategoryEntriesDetailView(title: row.category.name, entries: entries(for: row.category), category: row.category, month: month)
+                        } label: {
+                            SpendingHealthRow(health: row)
+                        }
+                        .buttonStyle(.plain)
+
+                        if row.id != rows.last?.id {
+                            Divider().background(Color.white.opacity(0.08))
+                        }
+                    }
+                }
+            }
+        }
+        .surface(.secondary, radius: ClarityRadius.large, padding: ClaritySpacing.xl)
+    }
+}
+
+private struct SpendingHealthRow: View {
+    let health: CategorySpendingHealth
+
+    private var stateColor: Color { GaugeThreshold.color(forProgress: health.progress) }
+    private var percentText: String { health.progress.formatted(.percent.precision(.fractionLength(0))) }
+
+    private var statusWord: String {
+        switch health.state {
+        case .overBudget: "over budget"
+        case .approachingLimit: "approaching its limit"
+        case .onTrack: "on track"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: ClaritySpacing.md) {
+            BudgetProgress(
+                progress: min(health.progress, 1),
+                isOverBudget: health.state == .overBudget,
+                diameter: 32
+            )
+
+            Text(health.category.name)
+                .font(.subheadline)
+                .foregroundStyle(.textPrimary)
+                .lineLimit(1)
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(health.spent.currencyFormatted) / \(health.budgeted.currencyFormatted)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.textPrimary)
+                Text(percentText)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(stateColor)
+            }
+        }
+        .padding(.vertical, ClaritySpacing.sm)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(health.category.name): \(health.spent.currencyFormatted) of \(health.budgeted.currencyFormatted), \(percentText) used, \(statusWord)")
+        .accessibilityHint("Double tap to view transactions")
+    }
+}
+
 private struct CalendarCard: View {
     let month: Date
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Calendar")
+            Text("Money Calendar")
                 .font(.sectionTitle)
                 .foregroundStyle(.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)

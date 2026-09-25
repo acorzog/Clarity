@@ -2,18 +2,17 @@ import XCTest
 @testable import FinanceTracker
 
 /// Focused tests for `CalendarView.dayAccessibilityLabel` — the pure, presentation-only helper
-/// added in Phase 2E to give each Calendar day cell a combined VoiceOver label. See
-/// `CLARITY_OVERVIEW_ACTIVITY_UX_SPEC.md` §8/§14/§16.
+/// giving each Money Calendar day cell a combined VoiceOver label based on that day's spending.
 ///
 /// Date/currency text is computed via the same formatting calls the label itself uses, rather
 /// than hardcoded — both are locale-dependent (confirmed: the test environment's locale renders
 /// "16 September", not "September 16"), so hardcoding one particular ordering would make these
 /// tests locale-fragile without actually testing `dayAccessibilityLabel`'s own logic.
 ///
-/// `CalendarView.dailyTotals`/`.monthEntries` themselves are not covered here: they're `@Query`-
+/// `CalendarView.dailySpending`/`.monthEntries` themselves are not covered here: they're `@Query`-
 /// backed computed properties on the view struct, requiring a live SwiftUI/SwiftData environment
-/// to resolve, and this phase does not restructure that (out of scope — see the Phase 2E report's
-/// Tests section for why cross-surface semantics 7-9 are verified by code inspection instead).
+/// to resolve — the budget-eligible/expense-only filtering they apply is exercised instead via
+/// `EntryQuerying`/`BudgetEligibility`'s own existing tests, which this view reuses verbatim.
 final class CalendarAccessibilityTests: XCTestCase {
     private func testDate(_ year: Int, _ month: Int, _ day: Int) -> Date {
         Calendar.current.date(from: DateComponents(year: year, month: month, day: day))!
@@ -23,81 +22,59 @@ final class CalendarAccessibilityTests: XCTestCase {
         date.formatted(.dateTime.month(.wide).day())
     }
 
-    func testEmptyDayProducesNoActivityLabel() {
+    func testNoSpendingProducesNoSpendingLabelWhenNil() {
         let day = testDate(2026, 9, 16)
-        let label = CalendarView.dayAccessibilityLabel(for: day, net: nil)
-        XCTAssertEqual(label, "\(dateText(day)), no activity")
+        let label = CalendarView.dayAccessibilityLabel(for: day, spent: nil)
+        XCTAssertEqual(label, "\(dateText(day)), no spending")
     }
 
-    func testPositiveNetProducesNetIncomeLabel() {
-        let day = testDate(2026, 9, 14)
-        let net: Decimal = 123
-        let label = CalendarView.dayAccessibilityLabel(for: day, net: net)
-        XCTAssertEqual(label, "\(dateText(day)), net income \(net.currencyFormatted)")
-        XCTAssertFalse(label.contains("expense"))
-        XCTAssertFalse(label.contains("no activity"))
+    func testNoSpendingProducesNoSpendingLabelWhenZero() {
+        // `dailySpending` never actually stores a literal `0` (it omits the day entirely), but
+        // the label helper is defensive about it regardless — a day passed `0` must read
+        // identically to a day passed `nil`.
+        let day = testDate(2026, 9, 16)
+        XCTAssertEqual(
+            CalendarView.dayAccessibilityLabel(for: day, spent: 0),
+            CalendarView.dayAccessibilityLabel(for: day, spent: nil)
+        )
     }
 
-    func testNegativeNetProducesNetExpenseLabel() {
+    func testPositiveSpendingProducesSpentLabelWithMagnitudeOnly() {
         let day = testDate(2026, 9, 15)
-        let net: Decimal = -45
-        let label = CalendarView.dayAccessibilityLabel(for: day, net: net)
-        XCTAssertEqual(label, "\(dateText(day)), net expense \(Decimal(45).currencyFormatted)")
-        XCTAssertFalse(label.contains("income"))
-        // The spoken amount must be positive magnitude ("expense 45", not "expense -45") —
-        // the word "expense" already carries the sign.
+        let spent: Decimal = 45
+        let label = CalendarView.dayAccessibilityLabel(for: day, spent: spent)
+        XCTAssertEqual(label, "\(dateText(day)), \(spent.currencyFormatted) spent")
+        XCTAssertFalse(label.contains("no spending"))
+        // Spending is always a positive magnitude in this view — never a signed/negative amount.
         XCTAssertFalse(label.contains("-"))
-    }
-
-    func testZeroNetWithActivityIsDistinguishedFromNoActivity() {
-        let day = testDate(2026, 9, 17)
-        let zeroNetWithActivity = CalendarView.dayAccessibilityLabel(for: day, net: 0)
-        let noActivity = CalendarView.dayAccessibilityLabel(for: day, net: nil)
-
-        XCTAssertEqual(zeroNetWithActivity, "\(dateText(day)), activity, net zero")
-        XCTAssertNotEqual(zeroNetWithActivity, noActivity)
-        XCTAssertTrue(zeroNetWithActivity.contains("activity"))
-        XCTAssertFalse(noActivity.contains("net zero"))
     }
 
     func testLabelIncludesTheCorrectDate() {
         let day = testDate(2026, 1, 3)
-        let label = CalendarView.dayAccessibilityLabel(for: day, net: 10)
+        let label = CalendarView.dayAccessibilityLabel(for: day, spent: 10)
         XCTAssertTrue(label.hasPrefix(dateText(day)))
     }
 
-    /// The four financial states (no activity / net zero / net income / net expense) must be
-    /// distinguishable from the label text alone — i.e. the meaning must not depend on the
-    /// day cell's color tint, which VoiceOver never announces.
-    func testFinancialMeaningIsCarriedByWordsNotColor() {
+    /// The smallest possible positive spend must still read as "spent," not "no spending" — the
+    /// `spent > 0` guard is a strict inequality, so this pins the exact boundary rather than just
+    /// a comfortably-positive amount like the other tests here.
+    func testSmallestPositiveSpendingStillProducesSpentLabel() {
+        let day = testDate(2026, 9, 15)
+        let label = CalendarView.dayAccessibilityLabel(for: day, spent: 0.01)
+        XCTAssertFalse(label.contains("no spending"))
+        XCTAssertTrue(label.contains("spent"))
+    }
+
+    /// Both states (no spending / spent an amount) must be distinguishable from the label text
+    /// alone — i.e. the meaning must not depend on the day cell's color tint, which VoiceOver
+    /// never announces.
+    func testSpendingStateIsCarriedByWordsNotColor() {
         let day = testDate(2026, 9, 20)
-        let labels = [
-            CalendarView.dayAccessibilityLabel(for: day, net: nil),
-            CalendarView.dayAccessibilityLabel(for: day, net: 0),
-            CalendarView.dayAccessibilityLabel(for: day, net: 30),
-            CalendarView.dayAccessibilityLabel(for: day, net: -30)
-        ]
+        let noSpending = CalendarView.dayAccessibilityLabel(for: day, spent: nil)
+        let spent = CalendarView.dayAccessibilityLabel(for: day, spent: 30)
 
-        // All four are unique strings, each carrying its own meaning in words.
-        XCTAssertEqual(Set(labels).count, labels.count)
-        XCTAssertTrue(labels[0].contains("no activity"))
-        XCTAssertTrue(labels[1].contains("activity, net zero"))
-        XCTAssertTrue(labels[2].contains("net income"))
-        XCTAssertTrue(labels[3].contains("net expense"))
-    }
-
-    // MARK: - hasOffsettingActivity (Phase 2J — zero-net-day visual indicator)
-
-    func testHasOffsettingActivityIsFalseForNoActivity() {
-        XCTAssertFalse(CalendarView.hasOffsettingActivity(net: nil))
-    }
-
-    func testHasOffsettingActivityIsTrueForZeroNet() {
-        XCTAssertTrue(CalendarView.hasOffsettingActivity(net: 0))
-    }
-
-    func testHasOffsettingActivityIsFalseForNonZeroNet() {
-        XCTAssertFalse(CalendarView.hasOffsettingActivity(net: 30))
-        XCTAssertFalse(CalendarView.hasOffsettingActivity(net: -30))
+        XCTAssertNotEqual(noSpending, spent)
+        XCTAssertTrue(noSpending.contains("no spending"))
+        XCTAssertTrue(spent.contains("spent"))
     }
 }

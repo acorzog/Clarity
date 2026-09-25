@@ -21,8 +21,9 @@ struct BudgetProgress: View {
     var tintColor: Color? = nil
 
     private var ringColor: Color {
-        if let tintColor { return isOverBudget ? .expense : tintColor }
-        return GaugeThreshold.color(forProgress: isOverBudget ? 1 : progress)
+        if isOverBudget { return .expense }
+        if let tintColor { return tintColor }
+        return GaugeThreshold.color(forProgress: progress)
     }
 
     var body: some View {

@@ -1,6 +1,6 @@
 import XCTest
 
-/// Covers More → Accounts: creating a new wallet, and the cross-cutting sync between a
+/// Covers the Wallets tab: creating a new wallet, and the cross-cutting sync between a
 /// transaction's wallet and that wallet's own transaction history — the "add to wallet" scenario.
 /// A silent break in either direction (a saved expense not showing up under its wallet, or a new
 /// wallet not showing up in the Accounts list) would surface as "my balances don't add up" for a
@@ -15,9 +15,8 @@ final class WalletManagementUITests: XCTestCase {
     }
 
     private func openAccounts() {
-        app.tabBars.buttons["More"].tap()
-        XCTAssertTrue(app.staticTexts["Accounts"].waitForExistence(timeout: 8), "More's Accounts card should render")
-        app.staticTexts["Accounts"].tap()
+        app.tabBars.buttons["Wallets"].tap()
+        XCTAssertTrue(app.staticTexts["Accounts"].waitForExistence(timeout: 8), "Wallets tab's Accounts header should render")
     }
 
     func testCreatingANewWalletShowsItInTheAccountsList() throws {

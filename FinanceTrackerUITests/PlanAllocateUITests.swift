@@ -23,6 +23,9 @@ final class PlanAllocateUITests: XCTestCase {
     private func openAllocateWithIncomeCollapsed() {
         app.tabBars.buttons["Plan"].tap()
         XCTAssertTrue(app.buttons["Allocate"].waitForExistence(timeout: 8))
+        // Plan now opens to Remaining by default, so Allocate must be selected explicitly rather
+        // than assumed.
+        app.buttons["Allocate"].tap()
         app.buttons["Income category group"].tap()
         // The collapse itself animates (`withAnimation(.easeInOut(duration: 0.2))`) and Housing's
         // rows only settle into their final on-screen position once it finishes.

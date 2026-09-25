@@ -113,10 +113,19 @@ struct SpendingInsightsCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Spending Insights")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Spending Insights")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                    // Distinguishes this from "Explain My Month" right above it by default —
+                    // that card's numbers are exact and reproducible; this one is an AI-written
+                    // take on the same month that can fail, need an API key, or read differently
+                    // on a refresh (see this file's own header doc comment).
+                    Text("AI-written take on your month")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.35))
+                }
                 Spacer()
                 Button {
                     Task { await refresh() }

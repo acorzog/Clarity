@@ -1,41 +1,71 @@
 import SwiftUI
 import SwiftData
 
+/// Clarity's "Money Calendar" — a month grid focused on daily spending. Tapping a day sets it as
+/// the persistent selection (shown via `selectionSummary` and a distinct highlight even after the
+/// detail sheet closes) and opens `DayEntriesView` for that day's full transaction list. Reuses
+/// `EntryQuerying`'s `.inMonth`/`.budgetEligible`/`.totalExpenses` exactly as every other spending
+/// calculation in the app does — this view derives no financial rule of its own, and month
+/// navigation is inherited from whatever `MonthSelector` already drives `month` (see
+/// `OverviewView`), not duplicated here.
 struct CalendarView: View {
     let month: Date
 
     @Query(sort: \Entry.date) private var allEntries: [Entry]
-    @State private var selectedDay: DaySelection?
+    @State private var selectedDay: Date?
+    @State private var showingDayDetail = false
 
-    private var monthEntries: [Entry] {
-        allEntries.inMonth(month)
+    init(month: Date) {
+        self.month = month
+        // Defaults to today when the displayed month is the current one, so the calendar opens
+        // with something meaningful already selected and today/selected have something to
+        // visually agree on; a past/future month starts with nothing selected rather than
+        // defaulting to an unrelated day.
+        _selectedDay = State(initialValue: Self.defaultSelectedDay(for: month))
     }
 
-    /// Net per day (income − expense; transfers are internal movement and don't count),
-    /// keyed by start-of-day — matches the keys produced by `monthGrid`.
-    private var dailyTotals: [Date: Decimal] {
-        var totals: [Date: Decimal] = [:]
-        for entry in monthEntries {
-            let day = Calendar.current.startOfDay(for: entry.date)
-            let delta: Decimal
-            switch entry.type {
-            case .income: delta = entry.amount
-            case .expense: delta = -entry.amount
-            case .transfer: delta = 0
-            }
-            totals[day, default: 0] += delta
+    /// Same rule `init` uses, factored out so `onChange(of: month)` below can re-apply it without
+    /// duplicating the logic. `CalendarView`'s caller (`CalendarCard`) re-renders this same view
+    /// instance with a new `month` on every month-navigation tap rather than constructing a fresh
+    /// one — `@State` set in `init` only runs once per view identity, so without this, `selectedDay`
+    /// would silently keep pointing at a day from whatever month was displayed when the user first
+    /// tapped one, disagreeing with the now-different month grid underneath `selectionSummary`.
+    private static func defaultSelectedDay(for month: Date, calendar: Calendar = .current) -> Date? {
+        let today = calendar.startOfDay(for: .now)
+        let isCurrentMonth = calendar.isDate(today, equalTo: month, toGranularity: .month)
+        return isCurrentMonth ? today : nil
+    }
+
+    private var monthEntries: [Entry] { allEntries.inMonth(month) }
+
+    /// Total budget-eligible expenses per day, keyed by start-of-day — matches the keys produced
+    /// by `monthGrid`. A day with no (budget-eligible) expenses is simply absent from this
+    /// dictionary — including a day that only had income or transfers — rather than stored as
+    /// zero, so "no spending" stays a single, unambiguous case throughout this view. Excluded
+    /// entries (`excludeFromBudget`) never count here, matching every other spending total in the
+    /// app (`Models/BudgetEligibility.swift`).
+    private var dailySpending: [Date: Decimal] {
+        Dictionary(grouping: monthEntries.budgetEligible.filter { $0.type == .expense }) {
+            Calendar.current.startOfDay(for: $0.date)
         }
-        return totals
+        .compactMapValues { entries in
+            let total = entries.totalExpenses
+            return total > 0 ? total : nil
+        }
     }
 
+    /// Every entry for a day, unfiltered — an activity/transaction list reads every entry
+    /// unconditionally, the same rule `Models/BudgetEligibility.swift` documents for Activity and
+    /// CSV export. Only `dailySpending` above is budget-eligible-filtered; the day's own
+    /// transaction list is not.
     private var entriesByDay: [Date: [Entry]] {
         Dictionary(grouping: monthEntries) { Calendar.current.startOfDay(for: $0.date) }
     }
 
-    /// Largest single-day magnitude this month, used to scale tint intensity so a bigger
-    /// income/spend day reads visibly stronger than a small one.
-    private var maxMagnitude: Decimal {
-        dailyTotals.values.map { abs($0) }.max() ?? 0
+    /// Largest single day's spend this month, used to scale tint intensity so a bigger spending
+    /// day reads visibly (but still subtly) stronger than a small one.
+    private var maxDailySpending: Decimal {
+        dailySpending.values.max() ?? 0
     }
 
     private var weeks: [[Date?]] {
@@ -50,29 +80,67 @@ struct CalendarView: View {
                 ForEach(weeks.indices, id: \.self) { weekIndex in
                     HStack(spacing: 6) {
                         ForEach(weeks[weekIndex].indices, id: \.self) { dayIndex in
+                            let day = weeks[weekIndex][dayIndex]
                             DayCell(
-                                day: weeks[weekIndex][dayIndex],
-                                net: weeks[weekIndex][dayIndex].flatMap { dailyTotals[$0] },
-                                intensity: intensity(for: weeks[weekIndex][dayIndex]),
-                                isToday: weeks[weekIndex][dayIndex].map { Calendar.current.isDateInToday($0) } ?? false
-                            ) { day in
-                                selectedDay = DaySelection(date: day)
+                                day: day,
+                                spent: day.flatMap { dailySpending[$0] },
+                                intensity: intensity(for: day),
+                                isToday: day.map { Calendar.current.isDateInToday($0) } ?? false,
+                                isSelected: day != nil && day == selectedDay
+                            ) { tapped in
+                                selectedDay = tapped
+                                showingDayDetail = true
                             }
                         }
                     }
                 }
             }
 
+            selectionSummary
+
             legend
         }
-        .sheet(item: $selectedDay) { selection in
-            DayEntriesView(day: selection.date, entries: entriesByDay[selection.date] ?? [])
+        .sheet(isPresented: $showingDayDetail) {
+            if let selectedDay {
+                DayEntriesView(day: selectedDay, entries: entriesByDay[selectedDay] ?? [])
+            }
+        }
+        // Re-applies `init`'s same default whenever the displayed month changes under this same
+        // view instance — see `defaultSelectedDay`'s doc comment for why this can't be left to
+        // `init` alone.
+        .onChange(of: month) { _, newMonth in
+            selectedDay = Self.defaultSelectedDay(for: newMonth)
+            showingDayDetail = false
         }
     }
 
+    /// A one-line "what did this day cost me" readout that updates the instant a different day is
+    /// tapped, so the total is visible without needing to open (or re-open) the detail sheet.
+    @ViewBuilder
+    private var selectionSummary: some View {
+        if let selectedDay {
+            let spent = dailySpending[selectedDay]
+            HStack {
+                Text(selectionDateText(for: selectedDay))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                Spacer()
+                Text((spent ?? 0).currencyFormatted)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(spent != nil ? Color.expenseRed : Color.white.opacity(0.4))
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func selectionDateText(for day: Date) -> String {
+        if Calendar.current.isDateInToday(day) { return "Today" }
+        return day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+    }
+
     private func intensity(for day: Date?) -> Double {
-        guard let day, let net = dailyTotals[day], maxMagnitude > 0 else { return 0 }
-        return min((abs(net) / maxMagnitude).doubleValue, 1)
+        guard let day, let spent = dailySpending[day], maxDailySpending > 0 else { return 0 }
+        return min((spent / maxDailySpending).doubleValue, 1)
     }
 
     private var weekdayHeader: some View {
@@ -88,9 +156,8 @@ struct CalendarView: View {
 
     private var legend: some View {
         HStack(spacing: 18) {
-            legendItem(color: .emerald, label: "Net income")
-            legendItem(color: .expenseRed, label: "Net spend")
-            legendItem(color: Color.white.opacity(0.15), label: "No activity")
+            legendItem(color: .expenseRed, label: "Spending")
+            legendItem(color: Color.white.opacity(0.15), label: "No spending")
         }
     }
 
@@ -131,42 +198,21 @@ struct CalendarView: View {
 }
 
 extension CalendarView {
-    /// Combined VoiceOver label for one day cell — date + financial meaning, never relying on
-    /// color. `net == nil` means no entries at all that day; `net == 0` (non-nil) means entries
-    /// existed (e.g. a transfer-only day, or income/expense that canceled out exactly) but their
-    /// net is zero. These two cases render visually identically today (the known, deliberately
-    /// deferred zero-net-day finding — `CLARITY_OVERVIEW_ACTIVITY_UX_SPEC.md` §8/§13) but must
-    /// read differently to a VoiceOver user, which this label already has enough information to
-    /// do without any new calculation.
-    static func dayAccessibilityLabel(for day: Date, net: Decimal?, calendar: Calendar = .current) -> String {
+    /// Combined VoiceOver label for one day cell — date + spending, never relying on color.
+    /// `spent == nil` (or `0`) means no budget-eligible expenses that day.
+    static func dayAccessibilityLabel(for day: Date, spent: Decimal?, calendar: Calendar = .current) -> String {
         let dateText = day.formatted(.dateTime.month(.wide).day())
-        guard let net else { return "\(dateText), no activity" }
-        if net == 0 { return "\(dateText), activity, net zero" }
-        if net > 0 { return "\(dateText), net income \(net.currencyFormatted)" }
-        return "\(dateText), net expense \(abs(net).currencyFormatted)"
+        guard let spent, spent > 0 else { return "\(dateText), no spending" }
+        return "\(dateText), \(spent.currencyFormatted) spent"
     }
-
-    /// Whether a day had transactions that netted to exactly zero (offsetting income/expense, or
-    /// a transfer-only day) — as opposed to no transactions at all. Both cases pass `net != 0 ==
-    /// false` and previously rendered visually identically (blank cell); this distinguishes them
-    /// so a small, non-color-only indicator (`DayCell`) can show "something happened here" without
-    /// implying an amount. Pure passthrough of the same `net` the cell already has — no new
-    /// calculation, no change to `dailyTotals`.
-    static func hasOffsettingActivity(net: Decimal?) -> Bool {
-        net == 0
-    }
-}
-
-private struct DaySelection: Identifiable {
-    let date: Date
-    var id: Date { date }
 }
 
 private struct DayCell: View {
     let day: Date?
-    let net: Decimal?
+    let spent: Decimal?
     let intensity: Double
     let isToday: Bool
+    let isSelected: Bool
     let onTap: (Date) -> Void
 
     var body: some View {
@@ -181,27 +227,30 @@ private struct DayCell: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
 
-                    if let net, net != 0 {
-                        Text(compactAmount(net))
+                    if let spent, spent > 0 {
+                        Text(compactAmount(spent))
                             .font(.footnote.weight(.semibold))
-                            .foregroundStyle(net > 0 ? Color.emerald : Color.expenseRed)
+                            .foregroundStyle(Color.expenseRed)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
-                    } else if CalendarView.hasOffsettingActivity(net: net) {
-                        // Distinguishes "transactions occurred but netted to zero" from "no
-                        // activity" — both previously rendered as an identical blank cell. A
-                        // shape/presence cue (not a color), matching this file's "no fake data,
-                        // no color-only meaning" convention; see `hasOffsettingActivity`'s doc.
-                        Circle()
-                            .fill(Color.white.opacity(0.35))
-                            .frame(width: 4, height: 4)
                     } else {
                         Text(" ").font(.footnote)
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
-                .background(backgroundColor, in: RoundedRectangle(cornerRadius: 10))
+                .background {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(spendTintColor)
+                        .overlay {
+                            // A brighter wash distinguishes "selected" from a plain spend tint —
+                            // fill, not another ring, so it never gets confused with `isToday`'s
+                            // outline even when the same day is both today and selected.
+                            if isSelected {
+                                RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.14))
+                            }
+                        }
+                }
                 .overlay {
                     if isToday {
                         RoundedRectangle(cornerRadius: 10).stroke(Color.skyBlue, lineWidth: 1.5)
@@ -216,7 +265,8 @@ private struct DayCell: View {
             // §14/§16.
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(CalendarView.dayAccessibilityLabel(for: day, net: net))
+            .accessibilityLabel(CalendarView.dayAccessibilityLabel(for: day, spent: spent))
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
             .accessibilityHint("Double tap to view this day's transactions")
         } else {
             Color.clear
@@ -226,19 +276,18 @@ private struct DayCell: View {
         }
     }
 
-    private var backgroundColor: Color {
-        guard let net, net != 0 else { return Color.white.opacity(0.05) }
+    private var spendTintColor: Color {
+        guard let spent, spent > 0 else { return Color.white.opacity(0.05) }
         let opacity = 0.12 + 0.28 * intensity
-        return net > 0 ? Color.emerald.opacity(opacity) : Color.expenseRed.opacity(opacity)
+        return Color.expenseRed.opacity(opacity)
     }
 
     private func compactAmount(_ value: Decimal) -> String {
-        let rounded = value.doubleValue
-        let sign = rounded > 0 ? "+" : ""
-        if abs(rounded) >= 1000 {
-            return String(format: "%@%.1fK", sign, rounded / 1000)
+        let amount = value.doubleValue
+        if amount >= 1000 {
+            return String(format: "%.1fK", amount / 1000)
         }
-        return String(format: "%@%.0f", sign, rounded)
+        return String(format: "%.0f", amount)
     }
 }
 

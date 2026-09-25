@@ -202,7 +202,14 @@ final class SpendingBreakdownCalculationTests: XCTestCase {
         XCTAssertEqual(spendingResult(asIfUserConfiguredCycleStartDay: 28), 40)
     }
 
-    // MARK: - Cross-surface consistency: Activity/Calendar stay raw, Spending doesn't (9, 10, 11)
+    // MARK: - Cross-surface consistency: Activity/Calendar-list stay raw, Calendar-total/Spending don't (9, 10, 11)
+    //
+    // The Money Calendar update deliberately split Calendar into two different eligibility
+    // rules: its day *transaction list* (`CalendarView.entriesByDay`) stays raw like Activity —
+    // an excludeFromBudget entry must still be visible/editable there — but its day *spend
+    // total* (`CalendarView.dailySpending`) is now budget-eligible, matching Spending, per
+    // `IMPLEMENTATION_LOG.md`'s Money Calendar entry ("Ensure totals respect the same financial
+    // rules used elsewhere ... including excluded transactions where applicable").
 
     func testActivityRemainsRawAndIncludesExcludedTransactions() {
         let context = TestSupport.makeInMemoryContext()
@@ -218,7 +225,7 @@ final class SpendingBreakdownCalculationTests: XCTestCase {
         XCTAssertTrue(activityEntries.contains { $0 === excluded }, "Activity must keep showing an excludeFromBudget entry")
     }
 
-    func testCalendarRemainsRawAndIncludesExcludedTransactions() {
+    func testCalendarTransactionListRemainsRawAndIncludesExcludedTransactions() {
         let context = TestSupport.makeInMemoryContext()
         let wallet = TestSupport.makeWallet()
         let head = TestSupport.makeHeadCategory(name: "Food")
@@ -226,20 +233,30 @@ final class SpendingBreakdownCalculationTests: XCTestCase {
         let excluded = TestSupport.makeEntry(amount: 75, date: testDate(2025, 6, 10), type: .expense, category: category, wallet: wallet, excludeFromBudget: true)
         context.insert(wallet); context.insert(head); context.insert(category); context.insert(excluded)
 
-        // `CalendarView.dailyTotals`'s exact formula — unfiltered, expense subtracts from net.
-        let calendarEntries = [excluded].inMonth(testDate(2025, 6, 1))
-        let dailyNet = calendarEntries.reduce(Decimal(0)) { total, entry in
-            switch entry.type {
-            case .income: total + entry.amount
-            case .expense: total - entry.amount
-            case .transfer: total
-            }
-        }
+        // `CalendarView.entriesByDay`'s exact population — `allEntries.inMonth(month)`, no
+        // `.budgetEligible` — this is what `DayEntriesView`'s transaction list is built from.
+        let dayEntries = [excluded].inMonth(testDate(2025, 6, 1))
 
-        XCTAssertEqual(dailyNet, -75, "Calendar's raw daily net must reflect an excludeFromBudget entry")
+        XCTAssertTrue(dayEntries.contains { $0 === excluded }, "Calendar's day transaction list must keep showing an excludeFromBudget entry")
     }
 
-    func testExcludedTransactionAppearsInActivityAndCalendarButNotInSpending() {
+    func testCalendarDailySpendingTotalExcludesExcludedTransactions() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let category = TestSupport.makeCategory(name: "Dining", headCategory: head)
+        let excluded = TestSupport.makeEntry(amount: 75, date: testDate(2025, 6, 10), type: .expense, category: category, wallet: wallet, excludeFromBudget: true)
+        let normal = TestSupport.makeEntry(amount: 20, date: testDate(2025, 6, 10), type: .expense, category: category, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(category); context.insert(excluded); context.insert(normal)
+
+        // `CalendarView.dailySpending`'s exact formula — `.budgetEligible.filter { $0.type ==
+        // .expense }.totalExpenses`, unlike the raw transaction list above.
+        let dailySpending = [excluded, normal].inMonth(testDate(2025, 6, 1)).budgetEligible.filter { $0.type == .expense }.totalExpenses
+
+        XCTAssertEqual(dailySpending, 20, "Calendar's daily spending total must exclude an excludeFromBudget entry, matching Spending")
+    }
+
+    func testExcludedTransactionAppearsInActivityAndCalendarListButNotInCalendarOrSpendingTotals() {
         let context = TestSupport.makeInMemoryContext()
         let wallet = TestSupport.makeWallet()
         let head = TestSupport.makeHeadCategory(name: "Food")
@@ -247,9 +264,13 @@ final class SpendingBreakdownCalculationTests: XCTestCase {
         let excluded = TestSupport.makeEntry(amount: 120, date: testDate(2025, 6, 10), type: .expense, category: category, wallet: wallet, excludeFromBudget: true)
         context.insert(wallet); context.insert(head); context.insert(category); context.insert(excluded)
 
-        // Activity/Calendar (raw): the entry is present.
+        // Activity and Calendar's transaction list (both raw): the entry is present.
         let rawEntries = [excluded].inMonth(testDate(2025, 6, 1))
         XCTAssertTrue(rawEntries.contains { $0 === excluded })
+
+        // Calendar's daily spend total (budget-eligible, like Spending): the entry contributes nothing.
+        let dailySpending = rawEntries.budgetEligible.filter { $0.type == .expense }.totalExpenses
+        XCTAssertEqual(dailySpending, 0)
 
         // Spending (budget analysis, via BudgetCalculator): the entry contributes nothing.
         let spendingSummary = BudgetCalculator.periodSpendingSummary(
@@ -258,7 +279,102 @@ final class SpendingBreakdownCalculationTests: XCTestCase {
         )
         XCTAssertEqual(spendingSummary.byCategory.first { $0.category === category }?.actual ?? 0, 0)
 
-        // This divergence is intentional — not a bug to reconcile. See
-        // CLARITY_OVERVIEW_ACTIVITY_SPEC.md §26 "Cross-surface consistency."
+        // This divergence (list stays raw, totals don't) is intentional — not a bug to reconcile.
+    }
+
+    // MARK: - Money Calendar: day boundaries, income/transfer-only days, and DayEntriesView's own formula
+
+    /// An entry on the last instant of the previous month, and one on the first day of the next,
+    /// must never leak into `dailySpending`'s grouping for the month in between — `entriesByDay`/
+    /// `dailySpending` are both built from `monthEntries = allEntries.inMonth(month)` first, so a
+    /// boundary leak here would mean the whole calendar grid, not just one cell.
+    func testMonthBoundaryEntriesDoNotLeakIntoTheAdjacentMonthsDailyTotals() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let category = TestSupport.makeCategory(name: "Dining", headCategory: head)
+        let lastDayOfMay = TestSupport.makeEntry(amount: 30, date: testDate(2025, 5, 31), type: .expense, category: category, wallet: wallet)
+        let firstDayOfJuly = TestSupport.makeEntry(amount: 40, date: testDate(2025, 7, 1), type: .expense, category: category, wallet: wallet)
+        let insideJune = TestSupport.makeEntry(amount: 10, date: testDate(2025, 6, 15), type: .expense, category: category, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(category)
+        context.insert(lastDayOfMay); context.insert(firstDayOfJuly); context.insert(insideJune)
+
+        let allEntries = [lastDayOfMay, firstDayOfJuly, insideJune]
+        // `CalendarView.monthEntries`'s exact expression.
+        let juneEntries = allEntries.inMonth(testDate(2025, 6, 1))
+
+        XCTAssertEqual(juneEntries.count, 1, "only the entry actually dated in June should be in June's entriesByDay/dailySpending")
+        XCTAssertTrue(juneEntries.contains { $0 === insideJune })
+        XCTAssertFalse(juneEntries.contains { $0 === lastDayOfMay })
+        XCTAssertFalse(juneEntries.contains { $0 === firstDayOfJuly })
+    }
+
+    /// A day with only income logged must be entirely absent from `dailySpending` (not present
+    /// with a `0`) while still appearing, income entry included, in the raw day transaction list —
+    /// exercising `dailySpending`'s `type == .expense` filter specifically, not just `.budgetEligible`.
+    func testIncomeOnlyDayIsAbsentFromDailySpendingButPresentInTheDayEntryList() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Income")
+        let category = TestSupport.makeCategory(name: "Salary", isIncome: true, headCategory: head)
+        let income = TestSupport.makeEntry(amount: 2000, date: testDate(2025, 6, 5), type: .income, category: category, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(category); context.insert(income)
+
+        let monthEntries = [income].inMonth(testDate(2025, 6, 1))
+        // `CalendarView.entriesByDay`: every entry for the day, unfiltered.
+        XCTAssertTrue(monthEntries.contains { $0 === income }, "the day's raw transaction list must still include an income-only day's entry")
+
+        // `CalendarView.dailySpending`: budget-eligible expenses only.
+        let daySpending = monthEntries.budgetEligible.filter { $0.type == .expense }.totalExpenses
+        XCTAssertEqual(daySpending, 0, "an income-only day contributes nothing to dailySpending")
+    }
+
+    /// Same shape as the income-only case, for a transfer between wallets: it must not read as
+    /// "spending" for the day even though it's a real, visible transaction.
+    func testTransferOnlyDayIsAbsentFromDailySpendingButPresentInTheDayEntryList() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let destination = TestSupport.makeWallet(name: "Savings")
+        let transfer = TestSupport.makeEntry(amount: 300, date: testDate(2025, 6, 12), type: .transfer, wallet: wallet, destinationWallet: destination)
+        context.insert(wallet); context.insert(destination); context.insert(transfer)
+
+        let monthEntries = [transfer].inMonth(testDate(2025, 6, 1))
+        XCTAssertTrue(monthEntries.contains { $0 === transfer })
+
+        let daySpending = monthEntries.budgetEligible.filter { $0.type == .expense }.totalExpenses
+        XCTAssertEqual(daySpending, 0, "a transfer-only day contributes nothing to dailySpending")
+    }
+
+    /// `DayEntriesView.daySpent`'s own exact formula (`entries.budgetEligible.totalExpenses`),
+    /// pinned directly rather than only inferred from `CalendarView.dailySpending`'s equivalence —
+    /// a day mixing a normal expense, an excluded expense, income, and a transfer all together,
+    /// the mix most likely to reveal the two views' formulas silently drifting apart.
+    func testDayEntriesViewSpentFormulaMatchesCalendarDailySpendingOnAMixedDay() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let destination = TestSupport.makeWallet(name: "Savings")
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let category = TestSupport.makeCategory(name: "Dining", headCategory: head)
+        let normal = TestSupport.makeEntry(amount: 25, date: testDate(2025, 6, 10), type: .expense, category: category, wallet: wallet)
+        let excluded = TestSupport.makeEntry(amount: 999, date: testDate(2025, 6, 10), type: .expense, category: category, wallet: wallet, excludeFromBudget: true)
+        let income = TestSupport.makeEntry(amount: 500, date: testDate(2025, 6, 10), type: .income, wallet: wallet)
+        let transfer = TestSupport.makeEntry(amount: 100, date: testDate(2025, 6, 10), type: .transfer, wallet: wallet, destinationWallet: destination)
+        context.insert(wallet); context.insert(destination); context.insert(head); context.insert(category)
+        context.insert(normal); context.insert(excluded); context.insert(income); context.insert(transfer)
+
+        let dayEntries = [normal, excluded, income, transfer]
+
+        // `CalendarView.dailySpending`'s formula for this one day.
+        let calendarDailySpending = dayEntries.budgetEligible.filter { $0.type == .expense }.totalExpenses
+        // `DayEntriesView.daySpent`'s formula, given the exact same day's entries.
+        let daySpent = dayEntries.budgetEligible.totalExpenses
+
+        XCTAssertEqual(calendarDailySpending, 25)
+        XCTAssertEqual(daySpent, 25, "DayEntriesView's own total formula must land on the same figure the calendar cell showed for this day")
+        XCTAssertEqual(calendarDailySpending, daySpent)
+
+        // The list itself stays raw — all four entries, including the excluded/income/transfer
+        // ones the total above doesn't count — visible and available to edit.
+        XCTAssertEqual(Set(dayEntries.map { $0.persistentModelID }), Set([normal, excluded, income, transfer].map { $0.persistentModelID }))
     }
 }

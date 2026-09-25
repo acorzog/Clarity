@@ -7,16 +7,16 @@ private struct ToolItem: Identifiable {
     let isAvailable: Bool
 }
 
-/// The "More" tab — a container for Accounts plus the existing utility screens. Formerly
-/// "Tools"; per the Phase 2B-2.2 navigation restructure, Accounts (the former standalone
-/// "Wallets" tab, per `CLARITY_PRODUCT_ARCHITECTURE.md` §13's Wallet→Account UX terminology
-/// decision) moved here rather than staying a top-level tab. The Swift type name is left as
-/// `ToolsView` — it's an internal identifier, not user-facing — to avoid an unrelated rename.
+/// The "More" tab — a container for Shared plus the existing utility screens. Formerly "Tools";
+/// Wallets is now back to being a top-level tab (see `MainTab`'s doc comment), and Shared — not
+/// yet fully developed — moved here in its place. The Swift type name is left as `ToolsView` —
+/// it's an internal identifier, not user-facing — to avoid an unrelated rename.
 struct ToolsView: View {
     @Environment(\.modelContext) private var modelContext
 
     private let items: [ToolItem] = [
-        ToolItem(title: "Accounts", icon: "wallet.pass.fill", isAvailable: true),
+        ToolItem(title: "Ask Clarity", icon: "bubble.left.and.bubble.right.fill", isAvailable: true),
+        ToolItem(title: "Shared", icon: "person.2.fill", isAvailable: true),
         ToolItem(title: "Categories", icon: "square.grid.2x2.fill", isAvailable: true),
         ToolItem(title: "Export CSV", icon: "square.and.arrow.up.fill", isAvailable: true),
         ToolItem(title: "Widgets", icon: "apps.iphone", isAvailable: true),
@@ -59,10 +59,14 @@ struct ToolsView: View {
     @ViewBuilder
     private func destination(for item: ToolItem) -> some View {
         switch item.title {
-        case "Accounts":
-            // `WalletsContentView`, not `WalletsView` — avoids nesting a second
-            // `NavigationStack` inside this one. See `WalletsView`'s doc comment.
-            WalletsContentView()
+        case "Ask Clarity":
+            AskClarityView()
+        case "Shared":
+            // `SharedContentView`-style embedding isn't available here — `SharedHomeView` wraps
+            // its own `NavigationStack`, so this nests a second navigation bar. Acceptable for
+            // now since Shared is a "not yet fully developed" placement in More, not its
+            // permanent home.
+            SharedHomeView()
         case "Categories":
             CategoriesView()
         case "Export CSV":

@@ -2,9 +2,9 @@ import SwiftUI
 import SwiftData
 
 /// Clarity's "Understand" surface — see `CLARITY_HOME_SPEC.md`. Composes already-computed
-/// values from `BudgetCalculator`, `HomeCalculator`, and `NetWorthCalculator`; performs no
-/// financial calculation of its own (`CLARITY_HOME_SPEC.md` §17/§13 — "HomeView must NOT become
-/// a calculation layer").
+/// values from `BudgetCalculator`, `HomeCalculator`, `NetWorthCalculator`, and
+/// `ClarityScoreCalculator`; performs no financial calculation of its own (`CLARITY_HOME_SPEC.md`
+/// §17/§13 — "HomeView must NOT become a calculation layer").
 struct HomeView: View {
     /// Lets a Home section switch tabs on tap — the closest existing navigation behavior. Home's
     /// drill-downs land on each destination tab's root, not a specific sub-tab or scroll
@@ -57,7 +57,7 @@ struct HomeView: View {
 
     private var safeToSpendStatusText: String {
         guard summary.totalAvailable > 0 else { return "" }
-        if safeToSpendRatio >= 1 { return "Over budget" }
+        if safeToSpendRatio > 1 { return "Over budget" }
         if safeToSpendRatio >= 0.85 { return "Getting close to budget" }
         return "On track"
     }
@@ -65,6 +65,10 @@ struct HomeView: View {
     private var periodRangeText: String {
         let lastDay = Calendar.current.date(byAdding: .day, value: -1, to: summary.period.end) ?? summary.period.end
         return "Through \(lastDay.formatted(.dateTime.month(.abbreviated).day()))"
+    }
+
+    private var clarityScoreResult: ClarityScoreResult {
+        ClarityScoreCalculator.clarityScore(entries: allEntries, budgets: allBudgets, headCategories: headCategories)
     }
 
     private var whatsDifferentInsights: [WhatsDifferentInsight] {
@@ -83,13 +87,6 @@ struct HomeView: View {
     private var forecastState: ForecastPaceState {
         HomeCalculator.forecastPaceState(pace: pace)
     }
-
-    // `.budgetEligible` matches `OverviewSummaryView`'s existing Income/Expenses card exactly —
-    // see `CLARITY_HOME_SPEC.md` §8 on why Financial Snapshot is budget-eligible, not raw cash flow.
-    private var monthEntries: [Entry] { allEntries.inMonth(month).budgetEligible }
-    private var snapshotIncome: Decimal { monthEntries.totalIncome }
-    private var snapshotExpenses: Decimal { monthEntries.totalExpenses }
-    private var snapshotNet: Decimal { snapshotIncome - snapshotExpenses }
 
     private var activeWallets: [Wallet] { Wallet.active(in: allWallets) }
     private var netWorth: Decimal { NetWorthCalculator.netWorth(wallets: allWallets) }
@@ -116,9 +113,10 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: ClaritySpacing.xxl) {
                     header
                     safeToSpendSection
+                    clarityScoreSection
+                    askClaritySection
                     whatsDifferentSection
                     upcomingSection
-                    financialSnapshotSection
                     netWorthSection
                     forecastSection
                 }
@@ -209,6 +207,171 @@ struct HomeView: View {
         return "Safe to spend: \(summary.totalLeft.currencyFormatted), \(safeToSpendStatusText.lowercased())"
     }
 
+    // MARK: - Clarity Score
+
+    private var clarityScoreTrendBadge: (delta: String, direction: DeltaIndicator.Direction, isFavorable: Bool?)? {
+        switch clarityScoreResult.trend {
+        case .up: ("+\(clarityScoreResult.pointsChange ?? 0)", .up, true)
+        case .down: ("\(clarityScoreResult.pointsChange ?? 0)", .down, false)
+        case .stable: ("±0", .flat, nil)
+        case .notEnoughHistory: nil
+        }
+    }
+
+    /// Builds the actual phrasing for a factor from its raw data — `ClarityScoreCalculator`
+    /// deliberately returns numbers, not sentences, so this (and not the calculator) owns the
+    /// wording, matching `WhatsDifferentRow.message`'s split of data vs. phrasing.
+    private func clarityScoreFactorTitle(_ factor: ClarityScoreFactor) -> String {
+        let percent = factor.magnitudeFraction.formatted(.percent.precision(.fractionLength(0)))
+        return switch factor.kind {
+        case .budgetPace: factor.isFavorable ? "\(percent) under your weekly budget pace" : "\(percent) over your weekly budget pace"
+        case .previousWeek: factor.isFavorable ? "\(percent) lower than last week" : "\(percent) higher than last week"
+        case .typicalWeek: factor.isFavorable ? "\(percent) below your typical week" : "\(percent) above your typical week"
+        case .monthOverMonth: factor.isFavorable ? "\(percent) lower than this point last month" : "\(percent) higher than this point last month"
+        }
+    }
+
+    /// True once the score reflects at least one real comparison — either a factor that actually
+    /// contributed this week, or a genuine week-ago score to compare against (which itself
+    /// requires real spend data at that anchor, not just a budget's existence — see
+    /// `ClarityScoreCalculator.snapshot`). False only for the plain `baselineScore` default with
+    /// zero comparisons available (e.g. a brand-new user's very first days), which must not be
+    /// shown as if it were an actual measure of financial health.
+    private var clarityScoreHasSignal: Bool {
+        !clarityScoreResult.factors.isEmpty || clarityScoreResult.trend != .notEnoughHistory
+    }
+
+    private var clarityScoreSummary: String {
+        guard clarityScoreResult.score != nil else {
+            return "Log a few expenses this week to start seeing your Clarity Score."
+        }
+        guard clarityScoreHasSignal else {
+            return "Your Clarity Score will get more precise as you add more transaction history."
+        }
+        guard let topFactor = clarityScoreResult.factors.first else {
+            return "Spending is right in line with your usual pattern."
+        }
+        let trendPhrase = switch clarityScoreResult.trend {
+        case .up: "Your score improved this week"
+        case .down: "Your score dipped this week"
+        case .stable: "Your score held steady this week"
+        case .notEnoughHistory: "Here's your Clarity Score"
+        }
+        return "\(trendPhrase) — \(clarityScoreFactorTitle(topFactor))."
+    }
+
+    private var clarityScoreAccessibilityLabel: String {
+        guard let score = clarityScoreResult.score, clarityScoreHasSignal else {
+            return "Clarity Score. \(clarityScoreSummary)"
+        }
+        return "Clarity Score: \(score) out of 100. \(clarityScoreSummary)"
+    }
+
+    private var clarityScoreSection: some View {
+        // Same `.secondary` tier as What's Different — both are lightweight "why" surfaces one
+        // step down from Safe to Spend's `.elevated` hero. See CLARITY_HOME_VISUAL_SPEC.md §5.
+        SectionCard(tier: .secondary) {
+            VStack(alignment: .leading, spacing: ClaritySpacing.md) {
+                HStack {
+                    Text("Clarity Score")
+                        .font(.sectionTitle)
+                        .foregroundStyle(.textSecondary)
+                    Spacer()
+                    if let badge = clarityScoreTrendBadge {
+                        DeltaIndicator(delta: badge.delta, direction: badge.direction, isFavorable: badge.isFavorable)
+                    }
+                }
+
+                if let score = clarityScoreResult.score, clarityScoreHasSignal {
+                    Text("\(score)")
+                        .heroAmountStyle()
+                        .foregroundStyle(.textPrimary)
+                }
+
+                Text(clarityScoreSummary)
+                    .font(.subheadline)
+                    .foregroundStyle(.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !clarityScoreResult.factors.isEmpty {
+                    VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
+                        ForEach(clarityScoreResult.factors) { factor in
+                            ClarityScoreFactorRow(factor: factor, title: clarityScoreFactorTitle(factor))
+                        }
+                    }
+                    .padding(.top, ClaritySpacing.xs)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(clarityScoreAccessibilityLabel)
+    }
+
+    // MARK: - Ask Clarity entry
+
+    /// 1-2 example questions drawn from data Home already computes (`whatsDifferentInsights`/
+    /// `summary`) — a light contextual touch, not a new calculation. Falls back to a generally
+    /// useful example when there's nothing more specific to point at yet.
+    private var askClarityHints: [String] {
+        var hints: [String] = []
+        if let topInsight = whatsDifferentInsights.first, !topInsight.subject.isEmpty {
+            hints.append("How much did I spend on \(topInsight.subject)?")
+        }
+        if hasBudgetData, summary.totalSpent > summary.totalAvailable {
+            hints.append("Am I within my budget?")
+        } else if hints.isEmpty {
+            hints.append("Where am I spending the most?")
+        }
+        return Array(hints.prefix(2))
+    }
+
+    /// Home's primary entry point into Ask Clarity — placed right after Clarity Score so the
+    /// flow reads "financial status → ask about it." A compact, input-styled card (never a
+    /// floating button), whole-card-tappable to open the existing conversation screen; never
+    /// duplicates that screen's own chat UI here. More → Ask Clarity remains a secondary way in.
+    private var askClaritySection: some View {
+        NavigationLink {
+            AskClarityView()
+        } label: {
+            VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
+                HStack(spacing: ClaritySpacing.sm) {
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(LinearGradient.emeraldSky)
+                    Text("Ask anything about your finances")
+                        .font(.subheadline)
+                        .foregroundStyle(.textSecondary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.textTertiary)
+                }
+
+                if !askClarityHints.isEmpty {
+                    HStack(spacing: ClaritySpacing.xs) {
+                        ForEach(askClarityHints, id: \.self) { hint in
+                            Text(hint)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.textSecondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Color.surfaceElevated, in: Capsule())
+                        }
+                    }
+                }
+            }
+            .padding(ClaritySpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.surfaceSecondary, in: RoundedRectangle(cornerRadius: ClarityRadius.large))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Ask Clarity. Ask anything about your finances.")
+        .accessibilityHint("Double tap to start a conversation")
+    }
+
     // MARK: - What's Different?
 
     /// Where a tap on a given insight should land — category/over-plan/pace insights explain
@@ -269,7 +432,7 @@ struct HomeView: View {
                     VStack(spacing: ClaritySpacing.sm) {
                         ForEach(Array(upcomingItems.prefix(HomeCalculator.maxUpcomingItems))) { item in
                             Button {
-                                selectedTab = .shared
+                                selectedTab = .more
                             } label: {
                                 UpcomingRow(item: item)
                             }
@@ -279,7 +442,7 @@ struct HomeView: View {
 
                     if upcomingItems.count > HomeCalculator.maxUpcomingItems {
                         Button("See all") {
-                            selectedTab = .shared
+                            selectedTab = .more
                         }
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color.emerald)
@@ -290,46 +453,13 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Financial Snapshot
-
-    /// Deliberately no `SectionCard`/surface — three numbers with a self-evident relationship
-    /// don't need a bounding box to read as a group; a hairline divider under the header is
-    /// enough separation. See CLARITY_HOME_VISUAL_SPEC.md §7.
-    @ViewBuilder
-    private var financialSnapshotSection: some View {
-        if !monthEntries.isEmpty {
-            Button {
-                selectedTab = .overview
-            } label: {
-                VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
-                    Text("Financial Snapshot")
-                        .font(.sectionTitle)
-                        .foregroundStyle(.textSecondary)
-
-                    Rectangle()
-                        .fill(Color.surfaceSecondary)
-                        .frame(height: 1)
-
-                    HStack {
-                        FinancialMetric(title: "Income", value: snapshotIncome.currencyFormattedSummary, color: .income)
-                        FinancialMetric(title: "Expenses", value: snapshotExpenses.currencyFormattedSummary, color: .expense)
-                        FinancialMetric(title: "Net", value: snapshotNet.currencyFormattedSummary, color: snapshotNet >= 0 ? .textPrimary : .expense)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
     // MARK: - Net Worth
 
     @ViewBuilder
     private var netWorthSection: some View {
         if !activeWallets.isEmpty {
             Button {
-                selectedTab = .more
+                selectedTab = .wallets
             } label: {
                 // `.primary` tier (the default, dimmest surface) with tighter `lg` padding — a
                 // compact card, one step down from What's Different/Upcoming's `.secondary`
@@ -383,6 +513,31 @@ struct HomeView: View {
 }
 
 // MARK: - Row subviews
+
+private struct ClarityScoreFactorRow: View {
+    let factor: ClarityScoreFactor
+    let title: String
+
+    private var percentText: String {
+        factor.magnitudeFraction.formatted(.percent.precision(.fractionLength(0)))
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: ClaritySpacing.sm) {
+            DeltaIndicator(
+                delta: percentText,
+                direction: factor.isFavorable ? .down : .up,
+                isFavorable: factor.isFavorable
+            )
+            Text(title)
+                .font(.footnote)
+                .foregroundStyle(.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+    }
+}
 
 private struct WhatsDifferentRow: View {
     let insight: WhatsDifferentInsight

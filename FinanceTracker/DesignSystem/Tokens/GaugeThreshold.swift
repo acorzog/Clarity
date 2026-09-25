@@ -17,11 +17,14 @@ import SwiftUI
 /// in an already-calculated progress fraction (e.g. `totalSpent / totalAvailable`, from
 /// `BudgetCalculator.periodSpendingSummary`).
 enum GaugeThreshold {
-    /// - Parameter progress: spent/available, expected in `0...1+` (values above 1 mean over
-    ///   budget and are treated the same as exactly 1).
+    /// - Parameter progress: spent/available, expected in `0...1+`. See
+    ///   `BudgetHealthState.forProgress(_:)` for the exact thresholds — notably, `progress == 1`
+    ///   reads as amber ("approaching"), not red ("over").
     static func color(forProgress progress: Double) -> Color {
-        if progress >= 1 { return .expense }
-        if progress >= 0.85 { return .warning }
-        return .income
+        switch BudgetHealthState.forProgress(progress) {
+        case .overBudget: .expense
+        case .approachingLimit: .warning
+        case .onTrack: .income
+        }
     }
 }

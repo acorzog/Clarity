@@ -1,9 +1,11 @@
 import Foundation
 import SwiftData
 
-/// Suggests a Category for a transaction note/merchant string by asking the Claude API to pick
-/// the best match from the user's real categories. Best-effort UX only — every failure path
-/// (missing key, offline, malformed response) returns nil rather than throwing or crashing.
+/// Suggests a Category for a transaction note/merchant string — first with a deterministic,
+/// offline name match against the user's real categories (`localCategoryMatch`), falling back to
+/// asking the Claude API to pick the best match only when that finds nothing. Best-effort UX
+/// only — every failure path (missing key, offline, malformed response) returns nil rather than
+/// throwing or crashing, and neither path ever invents a category name outside the user's own.
 enum CategorizationService {
     /// Set once at launch from FinanceTrackerApp.init() — see `SeedData.seedIfNeeded` call site.
     static var modelContext: ModelContext?
@@ -14,7 +16,6 @@ enum CategorizationService {
     static func suggestCategory(for note: String, isIncome: Bool = false) async -> Category? {
         let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedNote.isEmpty else { return nil }
-        guard let apiKey else { return nil }
         guard let modelContext else { return nil }
 
         guard
@@ -34,6 +35,17 @@ enum CategorizationService {
             allCategories.append(contentsOf: activeCategories)
         }
         guard !allCategories.isEmpty else { return nil }
+
+        // Deterministic, offline pass first — see `localCategoryMatch`. Only falls through to
+        // the AI suggestion below when nothing in the user's own category names obviously
+        // matches, so the common "the merchant/description already names a category" case
+        // (e.g. "Rent", "Gym membership") resolves instantly, with no network call and no API
+        // key required — important for a Shortcuts Automation that may run unattended.
+        if let localMatch = localCategoryMatch(for: trimmedNote, in: allCategories) {
+            return localMatch
+        }
+
+        guard let apiKey else { return nil }
 
         let prompt = """
         You categorize personal finance transactions. Given a transaction note or merchant \
@@ -164,6 +176,32 @@ enum CategorizationService {
     }
 
     // MARK: - Matching
+
+    /// Deterministic, offline category match: does an active category's own name appear as a
+    /// case-insensitive substring of `note` (or vice versa — covers a short note like "Gym"
+    /// matching a longer category name like "Gym Membership")? Reuses the caller's real
+    /// `Category` rows exactly as `matchCategory(named:in:)` does — never invents a name, only
+    /// ever returns one of `categories`. Internal (not `private`) so it's directly unit-testable
+    /// without a `ModelContext`.
+    ///
+    /// When more than one category matches, the longest matching category name wins, so a more
+    /// specific category (e.g. "Fast Food") is preferred over a shorter, coincidentally-matching
+    /// one (e.g. "Food"). Exposed as its own function (rather than folded into `suggestCategory`)
+    /// so it stays testable as a pure function and so `suggestCategory` can try it before ever
+    /// requiring an API key.
+    static func localCategoryMatch(for note: String, in categories: [Category]) -> Category? {
+        let normalizedNote = note.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedNote.isEmpty else { return nil }
+
+        let matches = categories.compactMap { category -> (Category, Int)? in
+            let normalizedName = category.name.lowercased()
+            guard !normalizedName.isEmpty else { return nil }
+            guard normalizedNote.contains(normalizedName) || normalizedName.contains(normalizedNote) else { return nil }
+            return (category, normalizedName.count)
+        }
+
+        return matches.max { $0.1 < $1.1 }?.0
+    }
 
     private static func matchCategory(named suggestion: String, in categories: [Category]) -> Category? {
         let normalized = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)

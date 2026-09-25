@@ -19,6 +19,31 @@ struct HeadCategoryActual: Identifiable {
     var id: PersistentIdentifier { headCategory.persistentModelID }
 }
 
+/// How alarmed a spent/planned ratio should look — the single rule for what counts as on track,
+/// approaching the limit, or over, originally extracted from `RemainingView.RemainingGauge.
+/// arcColor`/`BudgetGaugeWidget.BudgetGaugeWidgetView.ringColor` as `GaugeThreshold`
+/// (`DesignSystem/Tokens/GaugeThreshold.swift`). Lives here, not in the (SwiftUI-dependent)
+/// design system, so any plain-data calculation — like `OverviewCalculator.categorySpendingHealth`
+/// — can classify a ratio without importing SwiftUI; `GaugeThreshold.color(forProgress:)` maps
+/// this same enum to a `Color` rather than re-deriving the thresholds itself, so the two can never
+/// silently disagree.
+enum BudgetHealthState: Int, Comparable {
+    case onTrack = 0
+    case approachingLimit = 1
+    case overBudget = 2
+
+    static func < (lhs: BudgetHealthState, rhs: BudgetHealthState) -> Bool { lhs.rawValue < rhs.rawValue }
+
+    /// - Parameter progress: spent/planned, expected in `0...1+`. Spending exactly the planned
+    ///   amount (`progress == 1`) is "approaching the limit," not "over" — hitting your plan
+    ///   exactly isn't a bad outcome. Only strictly exceeding it (`> 1`) counts as over budget.
+    static func forProgress(_ progress: Double) -> BudgetHealthState {
+        if progress > 1 { return .overBudget }
+        if progress >= 0.85 { return .approachingLimit }
+        return .onTrack
+    }
+}
+
 /// Everything Remaining's gauge and the budget widget need to describe "Left to Spend" for one
 /// period — see `BudgetCalculator.periodSpendingSummary`.
 struct PeriodSpendingSummary {
