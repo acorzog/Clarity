@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// Sheet listing a single day's Entries, with a running total for that day at the top.
+/// Sheet listing a single day's Entries, with that day's total spend at the top.
 struct DayEntriesView: View {
     let day: Date
 
@@ -20,14 +20,13 @@ struct DayEntriesView: View {
         entries.sorted { $0.date > $1.date }
     }
 
-    private var dayTotal: Decimal {
-        entries.reduce(Decimal(0)) { total, entry in
-            switch entry.type {
-            case .income: total + entry.amount
-            case .expense: total - entry.amount
-            case .transfer: total
-            }
-        }
+    /// Budget-eligible expense total for this day — matches `CalendarView.dailySpending`'s own
+    /// calculation exactly (`.budgetEligible.totalExpenses`), so the figure shown here can never
+    /// disagree with the total the calendar cell/selection summary showed for the same day. The
+    /// transaction list below is still every entry, unfiltered — only this total excludes
+    /// `excludeFromBudget` entries.
+    private var daySpent: Decimal {
+        entries.budgetEligible.totalExpenses
     }
 
     var body: some View {
@@ -39,12 +38,12 @@ struct DayEntriesView: View {
                     List {
                         Section {
                             HStack {
-                                Text("Total")
+                                Text("Spent")
                                     .foregroundStyle(.white.opacity(0.6))
                                 Spacer()
-                                Text(dayTotal.currencyFormatted)
+                                Text(daySpent.currencyFormatted)
                                     .font(.title3.bold())
-                                    .foregroundStyle(dayTotal >= 0 ? Color.emerald : Color.expenseRed)
+                                    .foregroundStyle(daySpent > 0 ? Color.expenseRed : Color.white.opacity(0.6))
                             }
                         }
                         .listRowBackground(Color.white.opacity(0.05))
@@ -54,7 +53,7 @@ struct DayEntriesView: View {
                                 Button {
                                     editingEntry = entry
                                 } label: {
-                                    EntryRow(entry: entry)
+                                    DayEntryRow(entry: entry)
                                 }
                                 .buttonStyle(.plain)
                                 .listRowBackground(Color.white.opacity(0.05))
@@ -97,7 +96,7 @@ struct DayEntriesView: View {
                     }
                 }
             }
-            .sheet(item: $editingEntry) { entry in
+            .sheet(item: $editingEntry, onDismiss: refreshEntries) { entry in
                 AddTransactionView(entry: entry)
             }
             .sheet(isPresented: $showingAddTransaction, onDismiss: refreshEntries) {
@@ -118,8 +117,12 @@ struct DayEntriesView: View {
         modelContext.delete(entry)
     }
 
-    /// Re-syncs the local snapshot with SwiftData after the Add sheet closes, since a newly
-    /// created Entry isn't part of `entries` until we explicitly pick it up.
+    /// Re-syncs the local snapshot with SwiftData after the Add or Edit sheet closes. A newly
+    /// created Entry isn't part of `entries` until explicitly picked up; an edited one already is
+    /// (same live `@Model` reference, so in-place field changes like amount/category/
+    /// `excludeFromBudget` already show up without this) — but if the edit moved the entry's
+    /// `date` to a different day, only this re-fetch drops it from `entries`/`daySpent`, which
+    /// otherwise would keep counting an entry that no longer belongs to `day` at all.
     private func refreshEntries() {
         guard let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: day) else { return }
         let dayStart = day
@@ -127,6 +130,27 @@ struct DayEntriesView: View {
         let descriptor = FetchDescriptor<Entry>(predicate: predicate)
         if let fresh = try? modelContext.fetch(descriptor) {
             entries = fresh
+        }
+    }
+}
+
+/// Wraps the shared `EntryRow` with a caption for `excludeFromBudget` entries — local to this
+/// view rather than added to `EntryRow` itself (which several other screens also use, none of
+/// which mix excluded and counted entries side by side the way this list deliberately does).
+/// Without this, an entry visible here but missing from `daySpent` above it would look like an
+/// unexplained mismatch rather than the intentional "visible and editable, just not counted"
+/// behavior this list is designed to have.
+private struct DayEntryRow: View {
+    let entry: Entry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            EntryRow(entry: entry)
+            if entry.excludeFromBudget {
+                Text("Excluded from Spent total")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.35))
+            }
         }
     }
 }

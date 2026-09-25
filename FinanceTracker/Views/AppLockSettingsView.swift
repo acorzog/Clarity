@@ -6,6 +6,7 @@ struct AppLockSettingsView: View {
     @State private var isPINSet = AppLockService.isPINSet
     @State private var showingSetPIN = false
     @State private var showingChangePIN = false
+    @State private var showingDisableConfirmation = false
 
     var body: some View {
         Form {
@@ -13,15 +14,18 @@ struct AppLockSettingsView: View {
                 Toggle("Require Passcode", isOn: Binding(
                     get: { lockEnabled },
                     set: { newValue in
-                        if newValue && !isPINSet {
-                            // Must set a PIN before the lock can be turned on.
-                            showingSetPIN = true
-                        } else {
-                            lockEnabled = newValue
-                            if !newValue {
-                                AppLockService.clearPIN()
-                                isPINSet = false
+                        if newValue {
+                            if isPINSet {
+                                lockEnabled = true
+                            } else {
+                                // Must set a PIN before the lock can be turned on.
+                                showingSetPIN = true
                             }
+                        } else {
+                            // Clearing the PIN is a real, silent-feeling side effect of what looks
+                            // like a plain switch — confirm before committing it, matching the
+                            // app's explicit-destructive-action-confirms convention.
+                            showingDisableConfirmation = true
                         }
                     }
                 ))
@@ -45,14 +49,13 @@ struct AppLockSettingsView: View {
                 }
 
                 Section {
-                    Button {
+                    Button("Change PIN") {
                         showingChangePIN = true
-                    } label: {
-                        Text("Change PIN")
-                            .foregroundStyle(.white)
                     }
+                    .buttonStyle(.claritySecondary)
+                    .listRowInsets(EdgeInsets())
                 }
-                .listRowBackground(Color.white.opacity(0.05))
+                .listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
@@ -69,6 +72,16 @@ struct AppLockSettingsView: View {
             SetPINView {
                 isPINSet = true
             }
+        }
+        .alert("Turn Off Passcode?", isPresented: $showingDisableConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Turn Off", role: .destructive) {
+                lockEnabled = false
+                AppLockService.clearPIN()
+                isPINSet = false
+            }
+        } message: {
+            Text("This will remove your current PIN. You'll need to set a new one to turn Require Passcode back on.")
         }
     }
 }

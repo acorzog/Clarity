@@ -13,6 +13,15 @@ struct AddTransactionView: View {
     /// Wallet a new entry defaults to (ignored when editing). Falls back to the user's
     /// default wallet, then the first available one, when nil.
     var initialWallet: Wallet?
+    /// Category a new entry defaults to (ignored when editing an existing entry). Lets callers
+    /// like Remaining's category drill-down (`CategoryEntriesDetailView`) pre-fill the category
+    /// the user was already looking at, instead of falling back to Settings' configured default.
+    var initialCategory: Category?
+    /// Called with the created/edited Entry right before this view dismisses itself — mirrors
+    /// `CategoryEditorView.onSave`'s exact precedent. Lets a caller like Goals' Add Money flow
+    /// (Phase 2N-C1) capture the resulting Entry to link a `GoalContribution` to it, without this
+    /// view needing to know anything about Goals.
+    var onSave: ((Entry) -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -68,7 +77,7 @@ struct AddTransactionView: View {
                     Section {
                         if entryType == .transfer {
                             SelectionRow(
-                                title: "From Wallet",
+                                title: "From Account",
                                 iconName: selectedWallet?.icon,
                                 iconColorHex: selectedWallet?.colorHex,
                                 valueName: selectedWallet?.name
@@ -76,7 +85,7 @@ struct AddTransactionView: View {
                                 showingSourceWalletPicker = true
                             }
                             SelectionRow(
-                                title: "To Wallet",
+                                title: "To Account",
                                 iconName: destinationWallet?.icon,
                                 iconColorHex: destinationWallet?.colorHex,
                                 valueName: destinationWallet?.name
@@ -96,7 +105,7 @@ struct AddTransactionView: View {
                             if entryType == .expense {
                                 HStack(spacing: 8) {
                                     SelectionRow(
-                                        title: includesTransferToWallet ? "From Wallet" : "Wallet",
+                                        title: includesTransferToWallet ? "From Account" : "Account",
                                         iconName: selectedWallet?.icon,
                                         iconColorHex: selectedWallet?.colorHex,
                                         valueName: selectedWallet?.name
@@ -108,7 +117,7 @@ struct AddTransactionView: View {
 
                                 if includesTransferToWallet {
                                     SelectionRow(
-                                        title: "To Wallet",
+                                        title: "To Account",
                                         iconName: destinationWallet?.icon,
                                         iconColorHex: destinationWallet?.colorHex,
                                         valueName: destinationWallet?.name
@@ -118,7 +127,7 @@ struct AddTransactionView: View {
                                 }
                             } else {
                                 SelectionRow(
-                                    title: "Wallet",
+                                    title: "Account",
                                     iconName: selectedWallet?.icon,
                                     iconColorHex: selectedWallet?.colorHex,
                                     valueName: selectedWallet?.name
@@ -267,26 +276,10 @@ struct AddTransactionView: View {
     }
 
     private var amountField: some View {
-        HStack(spacing: 4) {
-            Text(Locale.current.currencySymbol ?? "$")
-                .font(.system(size: 36, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
-            TextField("0", text: $amountText)
-                .keyboardType(.decimalPad)
-                .font(.system(size: 52, weight: .bold))
-                .foregroundStyle(.white)
-                .fixedSize()
-                .focused($amountFieldFocused)
-                .onChange(of: amountText) { _, newValue in
-                    let filtered = newValue.sanitizedDecimalInput()
-                    if filtered != newValue {
-                        amountText = filtered
-                    }
-                }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 24)
-        .padding(.bottom, 16)
+        AmountField(text: $amountText, style: .hero, focus: $amountFieldFocused)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
     }
 
     private var dateRow: some View {
@@ -384,7 +377,7 @@ struct AddTransactionView: View {
             selectedWallet = initialWallet ?? wallets.first(where: \.isDefault) ?? wallets.first
             entryType = initialType
             date = initialDate
-            selectedCategory = defaultCategory(for: initialType)
+            selectedCategory = initialCategory ?? defaultCategory(for: initialType)
             amountFieldFocused = true
         }
     }
@@ -406,6 +399,7 @@ struct AddTransactionView: View {
     private func save() {
         guard let amountValue, let selectedWallet, isValid else { return }
 
+        let savedEntry: Entry
         if let entry {
             entry.amount = amountValue
             entry.date = date
@@ -416,6 +410,7 @@ struct AddTransactionView: View {
             entry.destinationWallet = savesDestinationWallet ? destinationWallet : nil
             entry.recurrence = recurrence
             entry.excludeFromBudget = excludeFromBudget
+            savedEntry = entry
         } else {
             let newEntry = Entry(
                 amount: amountValue,
@@ -429,40 +424,17 @@ struct AddTransactionView: View {
                 excludeFromBudget: excludeFromBudget
             )
             modelContext.insert(newEntry)
+            savedEntry = newEntry
         }
+        // Explicit save rather than relying on SwiftData's lazy autosave: `RootView` calls
+        // `modelContext.rollback()` on every foreground transition and every cross-process store
+        // change (needed to pick up entries the widget/Siri/a Shortcut write in their own
+        // process) — without this, an edit made here could still be sitting unsaved when one of
+        // those rollbacks fires (e.g. switching back to the app right after running a Shortcut is
+        // itself a foreground transition) and get silently discarded.
+        try? modelContext.save()
+        onSave?(savedEntry)
         dismiss()
-    }
-}
-
-private struct SelectionRow: View {
-    let title: String
-    let iconName: String?
-    let iconColorHex: String?
-    let valueName: String?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                    .foregroundStyle(.white)
-                Spacer()
-                if let valueName {
-                    if let iconName {
-                        Image(systemName: iconName)
-                            .foregroundStyle(iconColorHex.map { Color(hex: $0) } ?? .white)
-                    }
-                    Text(valueName)
-                        .foregroundStyle(.white.opacity(0.7))
-                } else {
-                    Text("Select")
-                        .foregroundStyle(.white.opacity(0.4))
-                }
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.3))
-            }
-        }
     }
 }
 

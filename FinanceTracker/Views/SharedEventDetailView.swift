@@ -78,6 +78,7 @@ struct SharedEventDetailView: View {
                         }
                     }
                     .disabled(isSharingEvent)
+                    .accessibilityLabel("Share event")
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -87,6 +88,7 @@ struct SharedEventDetailView: View {
                     Image(systemName: "plus.circle.fill")
                         .foregroundStyle(LinearGradient.emeraldSky)
                 }
+                .accessibilityLabel("Add expense")
             }
         }
         .sheet(isPresented: $showingAddExpense) {
@@ -237,6 +239,9 @@ struct SharedEventDetailView: View {
                 .foregroundStyle(color)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Matches `FinancialMetric`'s own combine behavior for this exact label+value shape
+        // (Phase 2J) — one VoiceOver stop ("Total, 42 euros") instead of two disconnected ones.
+        .accessibilityElement(children: .combine)
     }
 
     private var expensesSection: some View {

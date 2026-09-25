@@ -19,8 +19,8 @@ struct WalletPickerView: View {
                 if selectableWallets.isEmpty {
                     EmptyStateView(
                         icon: "wallet.pass",
-                        title: "No Wallets",
-                        message: "Add a wallet before recording transactions."
+                        title: "No Accounts",
+                        message: "Add an account before recording transactions."
                     )
                 } else {
                     List {
@@ -49,7 +49,7 @@ struct WalletPickerView: View {
                 }
             }
             .background(Color.appBackground.ignoresSafeArea())
-            .navigationTitle("Wallet")
+            .navigationTitle("Account")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

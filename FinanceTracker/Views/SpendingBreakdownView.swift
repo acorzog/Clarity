@@ -11,47 +11,83 @@ struct SpendingBreakdownView: View {
     let month: Date
 
     @ObservedObject private var settings = OverviewSettingsStore.shared
+    @ObservedObject private var budgetSettings = BudgetSettingsStore.shared
     @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query private var allBudgets: [Budget]
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
-    @Query(sort: \Category.name) private var categories: [Category]
     @State private var grouping: SpendingGrouping = .headCategories
     @State private var expandedHeadCategoryIDs: Set<PersistentIdentifier> = []
 
+    /// Spending is explicitly calendar-month, never Budget Cycle — see
+    /// `CLARITY_OVERVIEW_ACTIVITY_SPEC.md` §13/§23/§28. Every other field mirrors the live
+    /// store; only `cycleStartDay` is forced to 1 so `BudgetCalculator.periodSpendingSummary`
+    /// resolves the plain calendar month (`Date.budgetPeriod(startDay: 1)` — see
+    /// `Models/EntryQuerying.swift`) regardless of the user's configured Budget Cycle. This is
+    /// the one deliberate override; nothing else here re-derives calculation semantics.
+    private var calculationSettings: BudgetCalculationSettings {
+        var settings = BudgetCalculationSettings(from: budgetSettings)
+        settings.cycleStartDay = 1
+        return settings
+    }
+
+    /// The single source of truth for this month's category/head-category actual spend —
+    /// `Models/BudgetCalculator.swift`, the same centralized calculation layer Plan → Budget's
+    /// Remaining/Insights already consume. Spending never re-derives this total itself; see
+    /// `CLARITY_OVERVIEW_ACTIVITY_SPEC.md` §17 for why that used to be true and no longer is.
+    private var summary: PeriodSpendingSummary {
+        BudgetCalculator.periodSpendingSummary(
+            month: month, entries: allEntries, budgets: allBudgets, headCategories: headCategories,
+            settings: calculationSettings, respectHiddenCategories: true
+        )
+    }
+
+    /// Budget-eligible expense entries this calendar month — the same population `summary`'s
+    /// totals are drawn from. Used only to populate each row's drill-down entry list
+    /// (`CategoryEntriesDetailView`); the totals themselves always come from `summary`, never
+    /// from reducing this array.
     private var monthExpenses: [Entry] {
-        allEntries.inMonth(month).filter { $0.type == .expense }
+        allEntries.inMonth(month).budgetEligible.filter { $0.type == .expense }
     }
 
     private var donutSlices: [CategorySlice] {
-        headCategories.compactMap { head in
-            let total = monthExpenses
-                .filter { $0.category?.headCategory === head }
-                .reduce(Decimal(0)) { $0 + $1.amount }
-            guard total > 0 else { return nil }
-            return CategorySlice(id: head.id, name: head.name, icon: head.icon, colorHex: head.colorHex, amount: total)
+        summary.byHeadCategory.compactMap { headActual in
+            guard headActual.actual > 0 else { return nil }
+            let head = headActual.headCategory
+            return CategorySlice(id: head.id, name: head.name, icon: head.icon, colorHex: head.colorHex, amount: headActual.actual)
         }
         .sorted { $0.amount > $1.amount }
     }
 
+    /// Combined VoiceOver summary for the donut chart, built from the same `donutSlices` the
+    /// chart itself renders — see `SpendingBreakdownView.donutAccessibilitySummary(month:
+    /// categories:)` for the pure, testable formatting logic.
+    private var donutAccessibilitySummary: String {
+        SpendingBreakdownView.donutAccessibilitySummary(
+            month: month,
+            categories: donutSlices.map { (name: $0.name, amount: $0.amount) }
+        )
+    }
+
     private var headCategoryRows: [SpendingRowData] {
-        headCategories.compactMap { head in
+        summary.byHeadCategory.compactMap { headActual -> SpendingRowData? in
+            guard headActual.actual > 0 else { return nil }
+            let head = headActual.headCategory
             let entries = monthExpenses.filter { $0.category?.headCategory === head }
-            let total = entries.reduce(Decimal(0)) { $0 + $1.amount }
-            guard total > 0 else { return nil }
-            return SpendingRowData(id: head.id, name: head.name, colorHex: head.colorHex, total: total, entries: entries)
+            return SpendingRowData(id: head.id, name: head.name, colorHex: head.colorHex, total: headActual.actual, entries: entries)
         }
         .sorted { $0.total > $1.total }
     }
 
     private var categoryRows: [SpendingRowData] {
-        categories.filter { !$0.isArchived }.compactMap { category in
+        summary.byCategory.compactMap { categoryActual -> SpendingRowData? in
+            guard categoryActual.actual > 0 else { return nil }
+            let category = categoryActual.category
             let entries = monthExpenses.filter { $0.category === category }
-            let total = entries.reduce(Decimal(0)) { $0 + $1.amount }
-            guard total > 0 else { return nil }
             return SpendingRowData(
                 id: category.id,
                 name: category.name,
                 colorHex: category.resolvedColorHex,
-                total: total,
+                total: categoryActual.actual,
                 entries: entries
             )
         }
@@ -66,19 +102,21 @@ struct SpendingBreakdownView: View {
     /// same shape as `categoryRows` but scoped to a single head.
     private func subRows(forHeadID id: PersistentIdentifier) -> [SpendingRowData] {
         guard let head = headCategories.first(where: { $0.id == id }) else { return [] }
-        return categories.filter { !$0.isArchived && $0.headCategory === head }.compactMap { category in
-            let entries = monthExpenses.filter { $0.category === category }
-            let total = entries.reduce(Decimal(0)) { $0 + $1.amount }
-            guard total > 0 else { return nil }
-            return SpendingRowData(
-                id: category.id,
-                name: category.name,
-                colorHex: category.resolvedColorHex,
-                total: total,
-                entries: entries
-            )
-        }
-        .sorted { $0.total > $1.total }
+        return summary.byCategory
+            .filter { $0.category.headCategory === head }
+            .compactMap { categoryActual -> SpendingRowData? in
+                guard categoryActual.actual > 0 else { return nil }
+                let category = categoryActual.category
+                let entries = monthExpenses.filter { $0.category === category }
+                return SpendingRowData(
+                    id: category.id,
+                    name: category.name,
+                    colorHex: category.resolvedColorHex,
+                    total: categoryActual.actual,
+                    entries: entries
+                )
+            }
+            .sorted { $0.total > $1.total }
     }
 
     private func toggleExpanded(_ id: PersistentIdentifier) {
@@ -94,7 +132,7 @@ struct SpendingBreakdownView: View {
     var body: some View {
         VStack(spacing: 24) {
             if settings.showSpendingBreakdown {
-                DonutBreakdownCard(slices: donutSlices)
+                DonutBreakdownCard(slices: donutSlices, accessibilitySummary: donutAccessibilitySummary)
             }
 
             VStack(spacing: 16) {
@@ -147,6 +185,33 @@ struct SpendingBreakdownView: View {
     }
 }
 
+extension SpendingBreakdownView {
+    /// Pure, presentation-only formatter for the donut chart's combined VoiceOver summary: the
+    /// selected month, then each category's name, amount, and share of the total — in the same
+    /// descending-by-amount order the chart itself renders. Share is a simple derivation
+    /// (`amount / total`) from the same amounts already displayed on the chart, not a new
+    /// financial calculation — the totals themselves still come only from `donutSlices`
+    /// (`summary.byHeadCategory`, i.e. `BudgetCalculator`). See
+    /// `CLARITY_OVERVIEW_ACTIVITY_UX_SPEC.md` §14/§16.
+    static func donutAccessibilitySummary(month: Date, categories: [(name: String, amount: Decimal)]) -> String {
+        let periodText = month.formatted(.dateTime.month(.wide).year())
+
+        guard !categories.isEmpty else {
+            return "Spending breakdown for \(periodText). No expenses this month."
+        }
+
+        let total = categories.reduce(Decimal(0)) { $0 + $1.amount }
+        let categoryLines = categories.map { category -> String in
+            let amountText = category.amount.currencyFormatted
+            guard total > 0 else { return "\(category.name), \(amountText)." }
+            let percent = Int(((category.amount / total) * 100).doubleValue.rounded())
+            return "\(category.name), \(amountText), \(percent) percent."
+        }
+
+        return (["Spending breakdown for \(periodText)."] + categoryLines).joined(separator: " ")
+    }
+}
+
 private struct CategorySlice: Identifiable {
     let id: PersistentIdentifier
     let name: String
@@ -157,6 +222,7 @@ private struct CategorySlice: Identifiable {
 
 private struct DonutBreakdownCard: View {
     let slices: [CategorySlice]
+    let accessibilitySummary: String
 
     /// The slice currently shown in the center label. Defaults to the largest (already first,
     /// since `slices` is sorted descending) until the user taps a different wedge.
@@ -291,6 +357,13 @@ private struct DonutBreakdownCard: View {
         }
         .padding(20)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24))
+        // The chart's own tap-to-highlight interaction (`chartOverlay`'s `onTapGesture`) is
+        // preserved untouched below — this only adds a spoken summary VoiceOver users can reach
+        // without needing to interpret wedge geometry/color; it doesn't gate or replace the
+        // visual interaction. `.ignore` prevents VoiceOver from also exposing each `SectorMark`
+        // and the decorative per-slice icon badges as separate, context-free stops.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
     }
 }
 

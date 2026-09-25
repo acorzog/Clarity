@@ -29,6 +29,14 @@ final class Wallet {
     @Relationship(deleteRule: .nullify, inverse: \Entry.destinationWallet)
     var incomingTransfers: [Entry] = []
 
+    /// Formal inverse of `Goal.contextWallet` — required only so SwiftData correctly nullifies a
+    /// `Goal`'s display-only wallet reference when *this* wallet is deleted (mirrors
+    /// `incomingTransfers`'s own "nullify, never block" rationale). Not otherwise read anywhere;
+    /// added by Phase 2L (`CLARITY_GOALS_ARCHITECTURE.md`) — every other `Wallet` field/behavior,
+    /// including `goalAmount`, is unchanged.
+    @Relationship(deleteRule: .nullify, inverse: \Goal.contextWallet)
+    var goalReferences: [Goal] = []
+
     init(
         name: String,
         type: WalletType,

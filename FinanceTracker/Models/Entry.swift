@@ -31,6 +31,12 @@ final class Entry {
     /// Personal transactions created any other way leave this nil.
     var sharedSettlement: Settlement?
 
+    /// Set when this transaction has been explicitly marked as counting toward a `Goal` (see
+    /// `GoalContribution`). Personal transactions created any other way, or not yet linked to a
+    /// goal, leave this nil. Mirrors `sharedSettlement`'s exact shape and rationale — Phase 2L,
+    /// `CLARITY_GOALS_ARCHITECTURE.md` §5/§18.
+    var goalContribution: GoalContribution?
+
     init(
         amount: Decimal,
         date: Date = .now,

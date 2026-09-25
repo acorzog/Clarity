@@ -51,7 +51,7 @@ struct AddSettlementTransactionView: View {
 
                 Section {
                     SelectionRow(
-                        title: "Wallet",
+                        title: "Account",
                         iconName: selectedWallet?.icon,
                         iconColorHex: selectedWallet?.colorHex,
                         valueName: selectedWallet?.name
@@ -127,37 +127,5 @@ struct AddSettlementTransactionView: View {
         entry.sharedSettlement = settlement
         settlement.transaction = entry
         dismiss()
-    }
-}
-
-private struct SelectionRow: View {
-    let title: String
-    let iconName: String?
-    let iconColorHex: String?
-    let valueName: String?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                    .foregroundStyle(.white)
-                Spacer()
-                if let valueName {
-                    if let iconName {
-                        Image(systemName: iconName)
-                            .foregroundStyle(iconColorHex.map { Color(hex: $0) } ?? .white)
-                    }
-                    Text(valueName)
-                        .foregroundStyle(.white.opacity(0.7))
-                } else {
-                    Text("Select")
-                        .foregroundStyle(.white.opacity(0.4))
-                }
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.3))
-            }
-        }
     }
 }

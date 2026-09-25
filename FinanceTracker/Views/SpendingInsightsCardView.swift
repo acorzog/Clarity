@@ -1,6 +1,32 @@
 import SwiftUI
 import SwiftData
 
+/// `SpendingInsightsCardView`'s financial inputs — pulled out as pure, non-private functions
+/// (Phase 2N-G) so they're independently testable and so the card can no longer compute an
+/// expense/budget figure that disagrees with `BudgetCalculator`/`BudgetEligibility`, the single
+/// source every other budget/spending surface already goes through. Deliberately thin: this
+/// applies the existing `.budgetEligible` gate and reuses `BudgetCalculator.plannedBudgetTotals`
+/// rather than re-deriving either concern independently.
+enum SpendingInsightsAggregation {
+    /// Budget-eligible expense entries for `month` — matching every other budget/spending surface
+    /// on the Overview screen (`SummaryMetricsRow`). An `excludeFromBudget` entry must not appear
+    /// in an insight the deterministic summary above it doesn't count
+    /// (`Models/BudgetEligibility.swift`). Calendar-month-anchored, matching this card's own
+    /// existing period semantics — never Budget Cycle, which is unrelated to this fix.
+    static func eligibleExpenses(from entries: [Entry], in month: Date) -> [Entry] {
+        entries.inMonth(month).budgetEligible.filter { $0.type == .expense }
+    }
+
+    /// The planned-expense total for `month`, respecting hidden categories — reuses
+    /// `BudgetCalculator.plannedBudgetTotals` (already calendar-month-anchored, already
+    /// hidden-category-aware) instead of re-deriving category iteration independently. `nil`
+    /// when nothing is budgeted, matching this card's existing "omit the budget line" behavior.
+    static func budgetTotal(budgets: [Budget], headCategories: [HeadCategory], month: Date) -> Decimal? {
+        let total = BudgetCalculator.plannedBudgetTotals(month: month, budgets: budgets, headCategories: headCategories).totalPlannedExpenses
+        return total > 0 ? total : nil
+    }
+}
+
 /// AI-generated natural-language summary of a month's spending, shown at the top of the
 /// Overview sub-tab. Loads the cached summary for `month` if one exists; otherwise generates
 /// one. Supports pull-to-refresh (bubbles up to the enclosing ScrollView) and a manual refresh
@@ -21,11 +47,11 @@ struct SpendingInsightsCardView: View {
     }
 
     private var monthExpenses: [Entry] {
-        allEntries.inMonth(month).filter { $0.type == .expense }
+        SpendingInsightsAggregation.eligibleExpenses(from: allEntries, in: month)
     }
 
     private var previousMonthExpenses: [Entry] {
-        allEntries.inMonth(previousMonth).filter { $0.type == .expense }
+        SpendingInsightsAggregation.eligibleExpenses(from: allEntries, in: previousMonth)
     }
 
     private var topCategories: [SpendingInsightsService.CategoryAmount] {
@@ -71,11 +97,7 @@ struct SpendingInsightsCardView: View {
     }
 
     private var budgetTotal: Decimal? {
-        let expenseCategories = headCategories.flatMap { head in
-            head.categories.filter { !$0.isIncome && !$0.isArchived }
-        }
-        let total = expenseCategories.reduce(Decimal(0)) { $0 + allBudgets.amount(for: $1, month: month) }
-        return total > 0 ? total : nil
+        SpendingInsightsAggregation.budgetTotal(budgets: allBudgets, headCategories: headCategories, month: month)
     }
 
     private var aggregates: SpendingInsightsService.MonthlyAggregates {
@@ -91,10 +113,19 @@ struct SpendingInsightsCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Spending Insights")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Spending Insights")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                    // Distinguishes this from "Explain My Month" right above it by default —
+                    // that card's numbers are exact and reproducible; this one is an AI-written
+                    // take on the same month that can fail, need an API key, or read differently
+                    // on a refresh (see this file's own header doc comment).
+                    Text("AI-written take on your month")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.35))
+                }
                 Spacer()
                 Button {
                     Task { await refresh() }
@@ -129,8 +160,7 @@ struct SpendingInsightsCardView: View {
                     .foregroundStyle(.white.opacity(0.4))
             }
         }
-        .padding(20)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24))
+        .surface(.primary, radius: ClarityRadius.large, padding: ClaritySpacing.xl)
         .refreshable { await refresh() }
         .task(id: month) { await loadOrGenerate() }
     }

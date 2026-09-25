@@ -102,7 +102,7 @@ struct BudgetSettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Color.appBackground.ignoresSafeArea())
-            .navigationTitle("Editing Budget")
+            .navigationTitle("Editing Plan")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -112,6 +112,7 @@ struct BudgetSettingsView: View {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.white.opacity(0.5))
                     }
+                    .accessibilityLabel("Close")
                 }
             }
         }
@@ -139,6 +140,8 @@ private struct IconPickerRow: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(icon.accessibilityName)
+                .accessibilityAddTraits(selection == icon ? [.isSelected] : [])
             }
         }
         .padding(.vertical, 4)
@@ -160,7 +163,7 @@ private struct MonthlyBudgetGoalView: View {
                         .foregroundStyle(.white)
                 }
             } footer: {
-                Text("Used as the “Left to Spend” ceiling in Remaining when set. Leave blank to use this period's income instead.")
+                Text("Used as the “Available to Spend” ceiling in Remaining when set. Leave blank to use this period's income instead.")
                     .foregroundStyle(.white.opacity(0.4))
             }
             .listRowBackground(Color.white.opacity(0.05))

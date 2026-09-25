@@ -20,10 +20,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.andreacorzo.FinanceTracker</string>
+			<string>com.andreacorzo.FinanceTracker.dev</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>financetracker</string>
+				<string>financetrackerdev</string>
 			</array>
 		</dict>
 	</array>

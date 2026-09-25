@@ -55,7 +55,9 @@ struct SharedHomeView: View {
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 24)
+                    .readableContentWidth()
                 }
+                .refreshable { await DataSyncService.refresh(modelContext) }
             }
             .darkScreenBackground()
             .toolbar {
@@ -67,6 +69,7 @@ struct SharedHomeView: View {
                             .font(.title2)
                             .foregroundStyle(LinearGradient.emeraldSky)
                     }
+                    .accessibilityLabel("New shared event")
                 }
             }
         }

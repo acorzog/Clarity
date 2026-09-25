@@ -38,14 +38,14 @@ struct ManageWalletsView: View {
                     }
                     .onMove(perform: move)
                 } header: {
-                    Text("Wallets Order")
+                    Text("Accounts Order")
                 }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color.appBackground.ignoresSafeArea())
             .environment(\.editMode, .constant(.active))
-            .navigationTitle("Manage Wallets")
+            .navigationTitle("Manage Accounts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

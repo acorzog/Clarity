@@ -4,13 +4,15 @@ import SwiftData
 
 struct BudgetGaugeEntry: TimelineEntry {
     let date: Date
-    let budgeted: Decimal
+    /// Same meaning as `PeriodSpendingSummary.totalAvailable` — the manual/income/planned-budget
+    /// fallback chain `RemainingView` uses, not simply the raw planned-budget total.
+    let available: Decimal
     let spent: Decimal
 }
 
 struct BudgetGaugeProvider: TimelineProvider {
     func placeholder(in context: Context) -> BudgetGaugeEntry {
-        BudgetGaugeEntry(date: .now, budgeted: 1000, spent: 400)
+        BudgetGaugeEntry(date: .now, available: 1000, spent: 400)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (BudgetGaugeEntry) -> Void) {
@@ -27,44 +29,50 @@ struct BudgetGaugeProvider: TimelineProvider {
 /// Kept outside `BudgetGaugeProvider` because `TimelineProvider` declares its own
 /// associated type named `Entry`, which would shadow the SwiftData `Entry` model
 /// used here if this fetch logic lived inside the provider's scope.
+///
+/// Uses the same `BudgetCalculator.periodSpendingSummary` — with the same
+/// `BudgetCalculationSettings(from: BudgetSettingsStore.shared)` — as `RemainingView`, so this
+/// widget's "Left" figure can no longer independently disagree with the in-app Remaining gauge
+/// (see `CLARITY_PHASE_1_CALCULATION_PROPOSAL.md`). `BudgetSettingsStore` reads from the shared
+/// App Group `UserDefaults` suite, so this process sees the same cycle/manual-budget/include
+/// settings the app does.
 private enum BudgetGaugeDataSource {
     static func currentEntry() -> BudgetGaugeEntry {
         let month = Date.startOfMonth()
-        let (m, y) = month.monthYearComponents
-
         let context = ModelContext(SharedModelContainer.make())
 
         guard
             let budgets = try? context.fetch(FetchDescriptor<Budget>()),
-            let entries = try? context.fetch(FetchDescriptor<Entry>())
+            let entries = try? context.fetch(FetchDescriptor<Entry>()),
+            let headCategories = try? context.fetch(FetchDescriptor<HeadCategory>())
         else {
-            return BudgetGaugeEntry(date: .now, budgeted: 0, spent: 0)
+            return BudgetGaugeEntry(date: .now, available: 0, spent: 0)
         }
 
-        let budgeted = budgets
-            .filter { $0.month == m && $0.year == y && !$0.category.isIncome }
-            .reduce(Decimal(0)) { $0 + $1.monthlyLimit }
-        let spent = entries
-            .filter { $0.type == .expense && $0.isIn(month: month) }
-            .reduce(Decimal(0)) { $0 + $1.amount }
+        let summary = BudgetCalculator.periodSpendingSummary(
+            month: month,
+            entries: entries,
+            budgets: budgets,
+            headCategories: headCategories,
+            settings: BudgetCalculationSettings(from: BudgetSettingsStore.shared),
+            respectHiddenCategories: true
+        )
 
-        return BudgetGaugeEntry(date: .now, budgeted: budgeted, spent: spent)
+        return BudgetGaugeEntry(date: .now, available: summary.totalAvailable, spent: summary.totalSpent)
     }
 }
 
 struct BudgetGaugeWidgetView: View {
     let entry: BudgetGaugeEntry
 
-    private var left: Decimal { entry.budgeted - entry.spent }
+    private var left: Decimal { entry.available - entry.spent }
     private var progress: Double {
-        guard entry.budgeted > 0 else { return 0 }
-        return min(max((entry.spent / entry.budgeted).doubleValue, 0), 1)
+        guard entry.available > 0 else { return 0 }
+        return min(max((entry.spent / entry.available).doubleValue, 0), 1)
     }
     private var ringColor: Color {
-        guard entry.budgeted > 0 else { return .white.opacity(0.3) }
-        if progress >= 1 { return .expenseRed }
-        if progress >= 0.85 { return Color(red: 0.98, green: 0.68, blue: 0.16) }
-        return .emerald
+        guard entry.available > 0 else { return .white.opacity(0.3) }
+        return GaugeThreshold.color(forProgress: progress)
     }
 
     var body: some View {
@@ -116,5 +124,5 @@ struct BudgetGaugeWidget: Widget {
 #Preview(as: .systemSmall) {
     BudgetGaugeWidget()
 } timeline: {
-    BudgetGaugeEntry(date: .now, budgeted: 1000, spent: 400)
+    BudgetGaugeEntry(date: .now, available: 1000, spent: 400)
 }

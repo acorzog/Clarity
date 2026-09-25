@@ -15,7 +15,7 @@ struct AutomationsHelpView: View {
                     ActionSummaryRow(
                         icon: "plus.circle.fill",
                         title: "New Transaction",
-                        detail: "Logs an expense with an amount and wallet you provide. If you don't pick an exact category, it asks what the expense was for (e.g. \"restaurant\" or \"dentist\") and matches it to the closest real category. Works from Siri, the Shortcuts app, an Automation, or the Action Button — Clarity doesn't need to be open."
+                        detail: "Always asks for an amount and a merchant/note — Shortcuts prompts for whichever one an automation didn't already provide, the same reliable way it prompts for the amount, so this works even with Ask Before Running turned off. If you don't pick an exact category, the note is matched to the closest real category — instantly if it already resembles a category name, otherwise with an AI guess. Works from Siri, the Shortcuts app, an Automation, or the Action Button — Clarity doesn't need to be open."
                     )
                     ActionSummaryRow(
                         icon: "text.bubble.fill",
@@ -51,7 +51,7 @@ struct AutomationsHelpView: View {
 
                     HowToStep(number: 1, text: "In Shortcuts → Automation → + → Create Personal Automation, choose Apple Pay and pick a card.")
                     HowToStep(number: 2, text: "Add an action: Run Clarity, choose New Transaction or Transaction from Message depending on what text the automation gives you.")
-                    HowToStep(number: 3, text: "If no text is available, use New Transaction and fill in the amount — Clarity will prompt for anything left blank.")
+                    HowToStep(number: 3, text: "If no text is available, use New Transaction — Shortcuts will prompt for the amount and a merchant/note itself, even with Ask Before Running off.")
                 }
                 .padding(20)
                 .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))

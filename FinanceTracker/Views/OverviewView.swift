@@ -8,6 +8,7 @@ private enum OverviewSubTab: String, CaseIterable {
 }
 
 struct OverviewView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var showingAddTransaction = false
     @State private var showingSettings = false
     @State private var subTab: OverviewSubTab = .overview
@@ -41,14 +42,16 @@ struct OverviewView: View {
 
                 switch subTab {
                 case .overview:
-                    ScrollView { OverviewSummaryView(month: selectedMonth) }
+                    ScrollView { OverviewSummaryView(month: selectedMonth).readableContentWidth() }
                 case .spending:
-                    ScrollView { SpendingBreakdownView(month: selectedMonth) }
+                    ScrollView { SpendingBreakdownView(month: selectedMonth).readableContentWidth() }
                 case .list:
                     // Owns its own List/scrolling for swipe actions — not wrapped in ScrollView.
                     EntryListView(month: selectedMonth, searchText: searchText)
+                        .readableContentWidth()
                 }
             }
+            .refreshable { await DataSyncService.refresh(modelContext) }
             .darkScreenBackground()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -59,6 +62,7 @@ struct OverviewView: View {
                             .font(.title2)
                             .foregroundStyle(LinearGradient.emeraldSky)
                     }
+                    .accessibilityLabel("Overview settings")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -70,6 +74,7 @@ struct OverviewView: View {
                             .font(.title2)
                             .foregroundStyle(LinearGradient.emeraldSky)
                     }
+                    .accessibilityLabel("Search transactions")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -79,6 +84,7 @@ struct OverviewView: View {
                             .font(.title2)
                             .foregroundStyle(LinearGradient.emeraldSky)
                     }
+                    .accessibilityLabel("Add transaction")
                 }
             }
             .onChange(of: subTab) { _, newValue in

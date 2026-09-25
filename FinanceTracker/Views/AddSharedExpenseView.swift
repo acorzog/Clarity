@@ -223,24 +223,10 @@ struct AddSharedExpenseView: View {
     }
 
     private var amountField: some View {
-        HStack(spacing: 4) {
-            Text(Locale.current.currencySymbol ?? "$")
-                .font(.system(size: 36, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
-            TextField("0", text: $amountText)
-                .keyboardType(.decimalPad)
-                .font(.system(size: 52, weight: .bold))
-                .foregroundStyle(.white)
-                .fixedSize()
-                .focused($amountFieldFocused)
-                .onChange(of: amountText) { _, newValue in
-                    let filtered = newValue.sanitizedDecimalInput()
-                    if filtered != newValue { amountText = filtered }
-                }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 24)
-        .padding(.bottom, 16)
+        AmountField(text: $amountText, style: .hero, focus: $amountFieldFocused)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
     }
 
     private var dateRow: some View {
@@ -433,34 +419,3 @@ struct AddSharedExpenseView: View {
     }
 }
 
-private struct SelectionRow: View {
-    let title: String
-    let iconName: String?
-    let iconColorHex: String?
-    let valueName: String?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Text(title)
-                    .foregroundStyle(.white)
-                Spacer()
-                if let valueName {
-                    if let iconName {
-                        Image(systemName: iconName)
-                            .foregroundStyle(iconColorHex.map { Color(hex: $0) } ?? .white)
-                    }
-                    Text(valueName)
-                        .foregroundStyle(.white.opacity(0.7))
-                } else {
-                    Text("Select")
-                        .foregroundStyle(.white.opacity(0.4))
-                }
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.3))
-            }
-        }
-    }
-}
