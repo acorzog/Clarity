@@ -86,7 +86,7 @@ struct CategoryEntriesDetailView: View {
                         Button {
                             editingEntry = entry
                         } label: {
-                            EntryRow(entry: entry)
+                            EntryRow(entry: entry, showDate: true)
                         }
                         .buttonStyle(.plain)
                         .listRowBackground(Color.white.opacity(0.05))

@@ -149,8 +149,19 @@ enum BudgetCalculator {
             head.categories.filter { !$0.isIncome && !$0.isArchived }
         }
 
+        // Grouped once, up front (O(entries)), rather than re-filtering all of `periodExpenses`
+        // for every category (`allExpenseCategories.count` times, called from both `byCategory`
+        // and `byHeadCategory` below) — same totals either way (keyed by `persistentModelID`,
+        // equivalent to the `===` identity check this replaces, since every category here comes
+        // from the same `ModelContext`-backed `headCategories` query the entries' own `category`
+        // relationship resolves against), just without the repeated full-array scan.
+        let expenseSumsByCategory: [PersistentIdentifier: Decimal] = periodExpenses.reduce(into: [:]) { sums, entry in
+            guard let category = entry.category else { return }
+            sums[category.persistentModelID, default: 0] += entry.amount
+        }
+
         func actualSpend(for category: Category) -> Decimal {
-            periodExpenses.filter { $0.category === category }.reduce(Decimal(0)) { $0 + $1.amount }
+            expenseSumsByCategory[category.persistentModelID] ?? 0
         }
 
         let allExpenseCategories = headCategories.flatMap(expenseCategories)

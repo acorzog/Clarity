@@ -78,16 +78,6 @@ struct HomeView: View {
         )
     }
 
-    private var pace: [DailyPacePoint] {
-        BudgetCalculator.spendingPace(
-            month: month, entries: allEntries, settings: calculationSettings, totalPlanned: summary.totalBudgeted
-        )
-    }
-
-    private var forecastState: ForecastPaceState {
-        HomeCalculator.forecastPaceState(pace: pace)
-    }
-
     private var activeWallets: [Wallet] { Wallet.active(in: allWallets) }
     private var netWorth: Decimal { NetWorthCalculator.netWorth(wallets: allWallets) }
 
@@ -118,7 +108,6 @@ struct HomeView: View {
                     whatsDifferentSection
                     upcomingSection
                     netWorthSection
-                    forecastSection
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -481,33 +470,6 @@ struct HomeView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Net worth: \(netWorth.currencyFormattedSummary)")
         }
-    }
-
-    // MARK: - Forecast preview
-
-    private var forecastText: String {
-        switch forecastState {
-        case .insufficientData: "Not enough data yet this period"
-        case .onTrack: "Tracking close to plan this period"
-        case .aheadOfPace: "Spending faster than usual this period"
-        }
-    }
-
-    /// No `SectionCard`/surface — one informational sentence doesn't need a box, and a card
-    /// here would overstate a same-period pace comparison as more substantial than it is. See
-    /// CLARITY_HOME_VISUAL_SPEC.md §9. Not tappable — Plan → Forecast doesn't exist yet, and a
-    /// chevron/tap target would be a broken affordance.
-    private var forecastSection: some View {
-        VStack(alignment: .leading, spacing: ClaritySpacing.xs) {
-            Text("Forecast")
-                .font(.sectionTitle)
-                .foregroundStyle(.textSecondary)
-            Text(forecastText)
-                .font(.subheadline)
-                .foregroundStyle(.textPrimary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
     }
 
 }

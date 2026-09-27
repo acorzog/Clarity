@@ -2,6 +2,11 @@ import SwiftUI
 
 struct EntryRow: View {
     let entry: Entry
+    /// Shows the entry's date as a trailing caption under the amount — for lists that mix
+    /// entries from multiple days with no date-grouped section header to fall back on (e.g.
+    /// `CategoryEntriesDetailView`'s drill-down). Lists that already group by day (`EntryListView`,
+    /// `DayEntriesView`) leave this `false` since the section header already says the date.
+    var showDate: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -25,10 +30,21 @@ struct EntryRow: View {
 
             Spacer()
 
-            Text(amountText)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(amountColor)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(amountText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(amountColor)
+                if showDate {
+                    Text(dateText)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
         }
+    }
+
+    private var dateText: String {
+        entry.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
     }
 
     private var title: String {

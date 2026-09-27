@@ -10,6 +10,7 @@ struct FinanceTrackerApp: App {
     init() {
         if ProcessInfo.processInfo.arguments.contains("-uiTestReset") {
             SharedModelContainer.resetStoreForUITesting()
+            BudgetSettingsStore.resetForUITesting()
         }
         container = SharedModelContainer.make()
         SeedData.seedIfNeeded(context: container.mainContext)

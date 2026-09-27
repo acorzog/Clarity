@@ -131,4 +131,20 @@ final class BudgetSettingsStore: ObservableObject {
             appGroupDefaults.set(value, forKey: key)
         }
     }
+
+    /// Clears every key this store persists, from the same App-Group suite its own `init()` reads
+    /// — called from `FinanceTrackerApp.init()` alongside `SharedModelContainer.
+    /// resetStoreForUITesting()` when launched with `-uiTestReset`. Without this, a UI test run's
+    /// "clean slate" (`UITestSupport.launchApp()`'s own doc comment) was only ever true for the
+    /// SwiftData store — a name/icon/cycle-day/etc. customization set by any earlier run (manual
+    /// or automated) on the same simulator persisted forever in `UserDefaults`, silently
+    /// surviving every reset and eventually breaking any test asserting on, e.g., the default
+    /// "Plan" header text. Must run before `BudgetSettingsStore.shared` is first accessed (i.e.
+    /// before any view reads it), since the singleton reads these keys exactly once, in `init()`.
+    static func resetForUITesting() {
+        let defaults = UserDefaults(suiteName: SharedModelContainer.appGroupID) ?? .standard
+        for key in [Keys.name, Keys.icon, Keys.cycleStartDay, Keys.manualMonthlyBudget, Keys.includeUnplanned, Keys.includeSavings, Keys.includeDebt] {
+            defaults.removeObject(forKey: key)
+        }
+    }
 }
