@@ -3,10 +3,8 @@ import Foundation
 /// A toggleable, reorderable card shown on the Overview tab's "Overview" sub-tab.
 enum OverviewCard: String, CaseIterable, Identifiable, Codable {
     case explainMonth
-    case insights
     case spendingHealth
     case summary
-    case trends
     case calendar
 
     var id: String { rawValue }
@@ -14,10 +12,8 @@ enum OverviewCard: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .explainMonth: "Explain My Month"
-        case .insights: "Spending Insights"
         case .spendingHealth: "Spending Health"
         case .summary: "Income & Expenses"
-        case .trends: "Trends & Top Categories"
         case .calendar: "Money Calendar"
         }
     }
@@ -25,10 +21,8 @@ enum OverviewCard: String, CaseIterable, Identifiable, Codable {
     var icon: String {
         switch self {
         case .explainMonth: "doc.text.magnifyingglass"
-        case .insights: "sparkles"
         case .spendingHealth: "gauge.with.needle"
         case .summary: "chart.bar.fill"
-        case .trends: "chart.line.uptrend.xyaxis"
         case .calendar: "calendar"
         }
     }

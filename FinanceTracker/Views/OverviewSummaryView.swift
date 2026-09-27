@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import Charts
 
 struct OverviewSummaryView: View {
     let month: Date
@@ -14,34 +13,6 @@ struct OverviewSummaryView: View {
     private var monthEntries: [Entry] { allEntries.inMonth(month).budgetEligible }
     private var income: Decimal { monthEntries.totalIncome }
     private var expenses: Decimal { monthEntries.totalExpenses }
-
-    private var trend: [MonthlyTotal] {
-        (0..<6).reversed().compactMap { offset -> MonthlyTotal? in
-            guard let monthDate = Calendar.current.date(byAdding: .month, value: -offset, to: month) else {
-                return nil
-            }
-            return MonthlyTotal(month: monthDate, total: allEntries.inMonth(monthDate).budgetEligible.totalExpenses)
-        }
-    }
-
-    private var topCategories: [TopCategory] {
-        var sums: [PersistentIdentifier: Decimal] = [:]
-        var lookup: [PersistentIdentifier: Category] = [:]
-
-        for entry in monthEntries where entry.type == .expense {
-            guard let category = entry.category else { continue }
-            let id = category.persistentModelID
-            sums[id, default: 0] += entry.amount
-            lookup[id] = category
-        }
-
-        return sums
-            .sorted { $0.value > $1.value }
-            .prefix(5)
-            .compactMap { id, amount in
-                lookup[id].map { TopCategory(name: $0.name, amount: amount, colorHex: $0.resolvedColorHex) }
-            }
-    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -58,147 +29,22 @@ struct OverviewSummaryView: View {
         switch card {
         case .explainMonth:
             ExplainMyMonthCardView(month: month)
-        case .insights:
-            SpendingInsightsCardView(month: month)
         case .spendingHealth:
             SpendingHealthCardView(month: month)
         case .summary:
             SummaryMetricsRow(income: income, expenses: expenses)
-        case .trends:
-            InsightsSummaryCard(trend: trend, topCategories: topCategories)
         case .calendar:
             CalendarCard(month: month)
         }
     }
 }
 
-private struct MonthlyTotal: Identifiable {
-    var id: Date { month }
-    let month: Date
-    let total: Decimal
-}
-
 extension OverviewSummaryView {
-    /// Combined VoiceOver summary for the 6-month spending trend chart: the metric + period,
-    /// then each month's value in the same oldest-to-newest order `Chart(trend)` already renders.
-    /// `total` is each month's existing `.budgetEligible` expense total — the exact value the
-    /// chart already draws, not a new calculation. See `CLARITY_OVERVIEW_ACTIVITY_UX_SPEC.md`
-    /// §14/§16.
-    static func trendAccessibilitySummary(points: [(month: Date, total: Decimal)]) -> String {
-        guard !points.isEmpty else {
-            return "Monthly spending trend. No data available."
-        }
-
-        let monthText: (Date) -> String = { $0.formatted(.dateTime.month(.wide).year()) }
-        let periodText = points.count > 1
-            ? "\(monthText(points.first!.month)) to \(monthText(points.last!.month))"
-            : monthText(points.first!.month)
-
-        let pointLines = points.map { point in
-            "\(monthText(point.month)): \(point.total.currencyFormatted)."
-        }
-
-        return (["Monthly spending trend, \(periodText)."] + pointLines).joined(separator: " ")
-    }
-
     /// `false` only when there is literally no budget-eligible income or expense this month —
     /// distinct from a real balanced month (both nonzero, net == 0). Phase 2J, see
     /// `SummaryMetricsRow`'s doc comment and `CLARITY_V1_POLISH_REPORT.md` §4.
     static func summaryHasActivity(income: Decimal, expenses: Decimal) -> Bool {
         income != 0 || expenses != 0
-    }
-}
-
-private struct TopCategory: Identifiable {
-    var id: String { name }
-    let name: String
-    let amount: Decimal
-    let colorHex: String
-}
-
-private struct InsightsSummaryCard: View {
-    let trend: [MonthlyTotal]
-    let topCategories: [TopCategory]
-
-    private var trendAccessibilitySummary: String {
-        OverviewSummaryView.trendAccessibilitySummary(points: trend.map { (month: $0.month, total: $0.total) })
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Insights")
-                .font(.sectionTitle)
-                .foregroundStyle(.textSecondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("6-Month Trend")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.4))
-
-                Chart(trend) { item in
-                    LineMark(
-                        x: .value("Month", item.month, unit: .month),
-                        y: .value("Spent", item.total.doubleValue)
-                    )
-                    .foregroundStyle(Color.emerald)
-                    .interpolationMethod(.catmullRom)
-
-                    PointMark(
-                        x: .value("Month", item.month, unit: .month),
-                        y: .value("Spent", item.total.doubleValue)
-                    )
-                    .foregroundStyle(Color.emerald)
-                }
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .month)) { _ in
-                        AxisValueLabel(format: .dateTime.month(.abbreviated))
-                            .foregroundStyle(Color.white.opacity(0.5))
-                    }
-                }
-                .chartYAxis {
-                    AxisMarks { _ in
-                        AxisGridLine().foregroundStyle(Color.white.opacity(0.08))
-                    }
-                }
-                .frame(height: 120)
-            }
-            // Groups the "6-Month Trend" header with the chart itself into one spoken summary
-            // (mirroring the donut chart's Phase 2F treatment) rather than leaving the header as
-            // a separate, redundant stop next to a chart VoiceOver otherwise has no meaningful
-            // way to read. The chart has no tap/selection interaction to preserve.
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(trendAccessibilitySummary)
-
-            if !topCategories.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Top Categories")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.4))
-
-                    Chart(topCategories) { item in
-                        BarMark(
-                            x: .value("Amount", item.amount.doubleValue),
-                            y: .value("Category", item.name)
-                        )
-                        .foregroundStyle(Color(hex: item.colorHex))
-                        .annotation(position: .trailing) {
-                            Text(item.amount.currencyFormatted)
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.6))
-                        }
-                    }
-                    .chartXAxis(.hidden)
-                    .chartYAxis {
-                        AxisMarks { _ in
-                            AxisValueLabel()
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
-                    }
-                    .frame(height: CGFloat(topCategories.count) * 36 + 20)
-                }
-            }
-        }
-        .surface(.secondary, radius: ClarityRadius.large, padding: ClaritySpacing.xl)
     }
 }
 
@@ -234,13 +80,12 @@ private struct SummaryMetricsRow: View {
 
     var body: some View {
         if hasActivity {
-            HStack {
-                FinancialMetric(title: "Income", value: income.currencyFormattedSummary, color: .emerald)
-                Spacer()
-                FinancialMetric(title: "Expenses", value: expenses.currencyFormattedSummary, color: .expenseRed)
-                Spacer()
-                FinancialMetric(title: "Net", value: net.currencyFormattedSummary, color: netColor)
+            HStack(spacing: 40) {
+                FinancialMetric(title: "Income", value: income.currencyFormattedSummary, color: .emerald, alignment: .center)
+                FinancialMetric(title: "Expenses", value: expenses.currencyFormattedSummary, color: .expenseRed, alignment: .center)
+                FinancialMetric(title: "Net", value: net.currencyFormattedSummary, color: netColor, alignment: .center)
             }
+            .frame(maxWidth: .infinity)
         } else {
             Text("No activity yet this month")
                 .font(.caption)

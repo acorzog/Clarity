@@ -1,0 +1,17 @@
+#!/bin/sh
+# Blocks a commit that would introduce a secret (API key, token, private key, etc.) into the
+# repo — runs `ggshield secret scan pre-commit` against the staged diff. Requires the
+# GitGuardian CLI: `brew install gitguardian/tap/ggshield`, then `ggshield auth login` once
+# per machine (stores a personal token in the system keyring — never committed).
+#
+# This file lives in the repo (`.githooks/`, tracked) rather than `.git/hooks/` (never tracked,
+# so it silently doesn't exist on a fresh clone) — see the repo's `core.hooksPath` setting, which
+# points here. Run `git config core.hooksPath .githooks` once after cloning if it isn't already
+# set (a fresh `git clone` doesn't carry local git config).
+if ! command -v ggshield >/dev/null 2>&1; then
+    echo "⚠️  ggshield not installed — secret-scan pre-commit check skipped." >&2
+    echo "    Install: brew install gitguardian/tap/ggshield && ggshield auth login" >&2
+    exit 0
+fi
+
+ggshield secret scan pre-commit "$@"

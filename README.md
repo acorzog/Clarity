@@ -64,17 +64,19 @@ This repo is protected against accidentally committing API keys, credentials, or
 
 1. **`.gitignore`** excludes `Secrets.plist`, `.env` files, certificates (`.pem`, `.p12`, `.cer`, `.mobileprovision`), and similar sensitive file patterns outright.
 2. **[GitGuardian](https://www.gitguardian.com)** scans every commit and every push/PR for secrets that slip through anyway (a key pasted into source, a token in a comment, etc.):
-   - **Locally:** a pre-commit hook (via [`ggshield`](https://github.com/GitGuardian/ggshield)) blocks a commit if it contains a detected secret.
-   - **In CI:** [`.github/workflows/gitguardian.yml`](.github/workflows/gitguardian.yml) re-scans every push to `main` and every pull request.
+   - **Locally:** a pre-commit hook (via [`ggshield`](https://github.com/GitGuardian/ggshield)) blocks a commit if it contains a detected secret. The hook script itself lives in this repo at [`.githooks/pre-commit`](.githooks/pre-commit) (tracked, unlike `.git/hooks/`, which never travels with a clone) — see the one-time setup below to point git at it.
+   - **In CI:** [`.github/workflows/gitguardian.yml`](.github/workflows/gitguardian.yml) re-scans every push (any branch) and every pull request — a true backstop that catches a secret even if the local hook was skipped, missing, or bypassed (`--no-verify`).
 
 ### One-time setup (per machine)
 
 ```bash
 brew install gitguardian/tap/ggshield
-cd FinanceTracker   # repo root
-ggshield install -m local   # installs the local pre-commit hook
-ggshield auth login         # free GitGuardian account, opens a browser to authenticate
+cd FinanceTracker             # repo root
+git config core.hooksPath .githooks   # point git at the tracked hook (persists in this clone's local config)
+ggshield auth login           # free GitGuardian account, opens a browser to authenticate; stores a token in the system keyring
 ```
+
+`core.hooksPath` is local git config (`.git/config`), not something a `git clone` carries automatically — this one command is the only manual step needed after cloning.
 
 ### One-time setup (CI, repo owner only)
 

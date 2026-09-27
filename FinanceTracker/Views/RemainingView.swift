@@ -57,38 +57,96 @@ struct RemainingView: View {
             .filter { $0.type == .expense && $0.category === category }
     }
 
+    /// "Other Expenses" as a UI row was removed — it drilled into the exact same unplanned
+    /// transactions `ConsolidatedSection` already shows (grouped more usefully, by head category),
+    /// so keeping both meant the same spend appeared under two different, redundant labels on the
+    /// same screen. `settings.includeUnplannedAsOtherExpenses` still controls whether that spend
+    /// counts toward the gauge's total (`BudgetCalculator.periodSpendingSummary`) — only the
+    /// separate drill-down row here is gone. Savings/Debt stay: each is its own transfer type, not
+    /// a duplicate view of spend shown elsewhere.
     private func otherRows(for summary: PeriodSpendingSummary) -> [OtherSpendingRow] {
         var rows: [OtherSpendingRow] = []
-        if settings.includeUnplannedAsOtherExpenses && summary.otherExpensesTotal > 0 {
-            rows.append(OtherSpendingRow(
-                title: "Other Expenses", amount: summary.otherExpensesTotal, icon: "questionmark.circle.fill",
-                entries: otherExpenseEntries(in: summary)
-            ))
-        }
         if settings.includeSavingsTransfers && summary.savingsTransfersTotal > 0 {
-            rows.append(OtherSpendingRow(title: "Savings Transfers", amount: summary.savingsTransfersTotal, icon: "banknote.fill", entries: nil))
+            rows.append(OtherSpendingRow(title: "Savings Transfers", amount: summary.savingsTransfersTotal, icon: "banknote.fill"))
         }
         if settings.includeDebtTransfers && summary.debtTransfersTotal > 0 {
-            rows.append(OtherSpendingRow(title: "Debt Payments", amount: summary.debtTransfersTotal, icon: "creditcard.fill", entries: nil))
+            rows.append(OtherSpendingRow(title: "Debt Payments", amount: summary.debtTransfersTotal, icon: "creditcard.fill"))
         }
         return rows
     }
 
-    /// The exact transactions behind `summary.otherExpensesTotal` — mirrors
-    /// `BudgetCalculator.periodSpendingSummary`'s own "other" filter (no category at all, or a
-    /// category with a planned amount of 0 this period) exactly, using `summary.byCategory`'s
-    /// already-computed `planned` so a category's "is it budgeted" answer can never disagree
-    /// between the total shown and the list this drills into.
-    private func otherExpenseEntries(in summary: PeriodSpendingSummary) -> [Entry] {
+    /// Every budget-eligible expense entry this period — the full pool `consolidatedHeadGroups`
+    /// draws from.
+    private func periodExpenses() -> [Entry] {
         allEntries
             .inBudgetPeriod(month, startDay: settings.cycleStartDay)
             .budgetEligible
-            .filter { entry in
-                guard entry.type == .expense else { return false }
-                guard let category = entry.category else { return true }
-                let planned = summary.byCategory.first { $0.category === category }?.planned ?? 0
-                return planned == 0
-            }
+            .filter { $0.type == .expense }
+    }
+
+    /// Every expense entry this period, grouped by head category then category — the data behind
+    /// `ConsolidatedSection`. Deliberately *all* spend, not just the unplanned/unbudgeted slice
+    /// `otherExpenseEntries` covers: an earlier version scoped this to "Other Expenses" only, but
+    /// that meant any category with both a $0 planned amount and real spend (e.g. Outcomes'
+    /// Colombia/Cash/Bizum Out) showed up twice on screen — once in its own `HeadRemainingSection`
+    /// above, once again in this breakdown — under a label ("Other Expenses") that didn't fit a
+    /// section repeating data already visible. Scoping to everything instead makes the repetition
+    /// intentional: this is a consolidated, collapsed-by-default recap of the same data, not a
+    /// second "other" bucket. Entries with no category at all fall into a single synthetic
+    /// "Uncategorized" group, since there's no head category to attribute them to.
+    private func consolidatedHeadGroups() -> [ConsolidatedHeadGroup] {
+        let allExpenses = periodExpenses()
+        let categorized = Dictionary(grouping: allExpenses.filter { $0.category != nil }) {
+            $0.category!.persistentModelID
+        }
+        let uncategorized = allExpenses.filter { $0.category == nil }
+
+        var categoryGroupsByHead: [PersistentIdentifier: [ConsolidatedCategoryGroup]] = [:]
+        var headsByID: [PersistentIdentifier: HeadCategory] = [:]
+
+        for entries in categorized.values {
+            guard let category = entries.first?.category else { continue }
+            let group = ConsolidatedCategoryGroup(
+                id: category.name,
+                category: category,
+                total: entries.reduce(Decimal(0)) { $0 + $1.amount },
+                entries: entries.sorted { $0.date > $1.date }
+            )
+            let head = category.headCategory
+            categoryGroupsByHead[head.persistentModelID, default: []].append(group)
+            headsByID[head.persistentModelID] = head
+        }
+
+        var groups = categoryGroupsByHead.map { headID, categoryGroups -> ConsolidatedHeadGroup in
+            let head = headsByID[headID]!
+            let sortedCategories = categoryGroups.sorted { $0.total > $1.total }
+            return ConsolidatedHeadGroup(
+                id: head.name,
+                name: head.name,
+                colorHex: head.colorHex,
+                total: sortedCategories.reduce(Decimal(0)) { $0 + $1.total },
+                categories: sortedCategories
+            )
+        }
+        groups.sort { $0.total > $1.total }
+
+        if !uncategorized.isEmpty {
+            let total = uncategorized.reduce(Decimal(0)) { $0 + $1.amount }
+            groups.append(ConsolidatedHeadGroup(
+                id: "uncategorized",
+                name: "Uncategorized",
+                colorHex: "#8E8E93",
+                total: total,
+                categories: [ConsolidatedCategoryGroup(
+                    id: "uncategorized",
+                    category: nil,
+                    total: total,
+                    entries: uncategorized.sorted { $0.date > $1.date }
+                )]
+            ))
+        }
+
+        return groups
     }
 
     var body: some View {
@@ -115,6 +173,12 @@ struct RemainingView: View {
                     totalSpent: summary.totalSpent,
                     breakdown: headCategories.compactMap { headSummary(for: $0, in: summary) }
                 )
+                .padding(.bottom, -60)
+
+                let consolidatedGroups = consolidatedHeadGroups()
+                if !consolidatedGroups.isEmpty {
+                    ConsolidatedSection(groups: consolidatedGroups, total: summary.totalSpent)
+                }
 
                 VStack(spacing: 16) {
                     ForEach(headCategories) { head in
@@ -175,16 +239,31 @@ extension RemainingView {
     }
 }
 
+/// Savings Transfers / Debt Payments — each a single transfer type, not a bucket of otherwise-
+/// unrelated categories, so both stay plain non-interactive summary rows (no drill-down).
 private struct OtherSpendingRow: Identifiable {
     var id: String { title }
     let title: String
     let amount: Decimal
     let icon: String
-    /// The transactions behind `amount`, when there's a meaningful list to drill into (currently
-    /// only "Other Expenses" — a mix of uncategorized and unbudgeted-category spend). `nil` for
-    /// "Savings Transfers"/"Debt Payments", which are a single transfer type rather than a bucket
-    /// of otherwise-unrelated categories, so the row stays a plain non-interactive summary there.
-    let entries: [Entry]?
+}
+
+/// One head category's share of `ConsolidatedSection` — see `RemainingView.consolidatedHeadGroups`.
+private struct ConsolidatedHeadGroup: Identifiable {
+    let id: String
+    let name: String
+    let colorHex: String
+    let total: Decimal
+    let categories: [ConsolidatedCategoryGroup]
+}
+
+/// One category's (or, for `category == nil`, the "Uncategorized" bucket's) share of a head
+/// group within `ConsolidatedSection` — see `RemainingView.consolidatedHeadGroups`.
+private struct ConsolidatedCategoryGroup: Identifiable {
+    let id: String
+    let category: Category?
+    let total: Decimal
+    let entries: [Entry]
 }
 
 private struct OtherSpendingCard: View {
@@ -198,7 +277,7 @@ private struct OtherSpendingCard: View {
 
             VStack(spacing: 0) {
                 ForEach(rows) { row in
-                    rowContent(row)
+                    rowLabel(row)
                         .padding(.horizontal)
                         .padding(.vertical, 12)
 
@@ -208,20 +287,6 @@ private struct OtherSpendingCard: View {
                 }
             }
             .surface(.primary, radius: ClarityRadius.medium, padding: 0)
-        }
-    }
-
-    @ViewBuilder
-    private func rowContent(_ row: OtherSpendingRow) -> some View {
-        if let entries = row.entries {
-            NavigationLink {
-                CategoryEntriesDetailView(title: row.title, entries: entries)
-            } label: {
-                rowLabel(row)
-            }
-            .buttonStyle(.plain)
-        } else {
-            rowLabel(row)
         }
     }
 
@@ -235,12 +300,126 @@ private struct OtherSpendingCard: View {
             Spacer()
             Text(row.amount.currencyFormatted)
                 .foregroundStyle(.white.opacity(0.7))
-            if row.entries != nil {
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.3))
-            }
         }
+    }
+}
+
+/// A single collapsed-by-default overview of every category with spend this period, grouped by
+/// head category — sits once, right below the gauge, above the normal per-head cards. Collapsed,
+/// it reads as one line ("Consolidated · total spent"); expanded, it mirrors the same
+/// head-category → category → transactions drill-down the per-head cards below already show, so
+/// this is intentionally a *recap*, not a second source of "hidden" spend — see
+/// `RemainingView.consolidatedHeadGroups`'s doc comment for why it isn't scoped to unplanned
+/// spend only.
+private struct ConsolidatedSection: View {
+    let groups: [ConsolidatedHeadGroup]
+    let total: Decimal
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                VStack(spacing: 0) {
+                    ForEach(groups) { group in
+                        ConsolidatedHeadGroupRow(group: group)
+                        if group.id != groups.last?.id {
+                            Divider().background(Color.white.opacity(0.06)).padding(.leading, 24)
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "list.bullet.rectangle.portrait")
+                        .foregroundStyle(.white.opacity(0.5))
+                        .frame(width: 20)
+                    Text("Consolidated")
+                        .foregroundStyle(.white)
+                    Spacer()
+                    Text(total.currencyFormatted)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                // Stable hook for UI tests (`RemainingOtherExpensesUITests`) — must sit on the
+                // *label* (combined into its own accessibility element), not chained after the
+                // whole `DisclosureGroup`: an identifier applied there attaches to the disclosure's
+                // entire subtree, including its expanded content, and silently overwrites every
+                // descendant's own `accessibilityIdentifier` (verified by dumping
+                // `app.debugDescription` mid-test — every nested row came back tagged
+                // "consolidatedSection" instead of its own id).
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("consolidatedSection")
+            }
+            .tint(.white.opacity(0.4))
+            .padding(.horizontal)
+            .padding(.vertical, 12)
+        }
+        .surface(.primary, radius: ClarityRadius.medium, padding: 0)
+    }
+}
+
+/// One head category's row within the expanded `ConsolidatedSection` — itself expandable to
+/// reveal the categories that make up its total, each linking through to
+/// `CategoryEntriesDetailView` for the actual transactions.
+private struct ConsolidatedHeadGroupRow: View {
+    let group: ConsolidatedHeadGroup
+    @State private var isExpanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(spacing: 0) {
+                ForEach(group.categories) { categoryGroup in
+                    NavigationLink {
+                        CategoryEntriesDetailView(
+                            title: categoryGroup.category?.name ?? "Uncategorized",
+                            entries: categoryGroup.entries
+                        )
+                    } label: {
+                        HStack(spacing: 10) {
+                            if let category = categoryGroup.category {
+                                CategoryIconView(category: category, size: 26)
+                            } else {
+                                Image(systemName: "questionmark.circle")
+                                    .font(.callout)
+                                    .foregroundStyle(.white.opacity(0.6))
+                                    .frame(width: 26, height: 26)
+                                    .background(Color.white.opacity(0.1), in: Circle())
+                            }
+                            Text(categoryGroup.category?.name ?? "Uncategorized")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.85))
+                            Spacer()
+                            Text(categoryGroup.total.currencyFormatted)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("consolidatedCategoryRow-\(categoryGroup.category?.name ?? "Uncategorized")")
+                }
+            }
+            .padding(.leading, 16)
+            .padding(.top, 4)
+        } label: {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color(hex: group.colorHex))
+                    .frame(width: 8, height: 8)
+                Text(group.name)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.9))
+                Spacer()
+                Text(group.total.currencyFormatted)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            // See `ConsolidatedSection`'s identical comment — must sit on the label, not the
+            // whole `DisclosureGroup`, or it overwrites `consolidatedCategoryRow-*` below it.
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("consolidatedHeadGroup-\(group.name)")
+        }
+        .tint(.white.opacity(0.3))
+        .padding(.leading, 20)
     }
 }
 
@@ -385,7 +564,7 @@ private struct HeadRemainingSection: View {
                     }
                     .buttonStyle(.plain)
                     if category !== categories.last {
-                        Divider().background(Color.white.opacity(0.08)).padding(.leading, 60)
+                        Divider().background(Color.white.opacity(0.08)).padding(.leading, 24)
                     }
                 }
             }

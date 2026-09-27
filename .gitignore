@@ -17,6 +17,9 @@ GoogleService-Info.plist
 *-Info.private.plist
 *.xcresult
 
+# ggshield's local scan cache (per-machine, not shared state)
+.cache_ggshield
+
 # Xcode
 .DS_Store
 build/
