@@ -1,8 +1,10 @@
 name: GitGuardian Secret Scan
 
 on:
+  # Every branch, not just main — a direct push to a feature/working branch (e.g. clarity-2.1)
+  # is exactly as capable of leaking a secret as a push to main, and this repo's actual workflow
+  # pushes straight to a working branch far more often than to main.
   push:
-    branches: [main]
   pull_request:
 
 jobs:
