@@ -83,9 +83,33 @@ final class Wallet {
         (entries + incomingTransfers).sorted { $0.date > $1.date }
     }
 
-    /// Derived from starting balance plus every entry touching this wallet, so it can never drift out of sync.
+    /// Derived from starting balance plus every entry dated today or earlier touching this
+    /// wallet, so it can never drift out of sync — and so it represents the real, current bank
+    /// balance this figure stands in for. An entry dated in the future (a known upcoming charge
+    /// entered ahead of time, e.g. today for a bill due in 2 days) deliberately does NOT reduce
+    /// this balance until its own date actually arrives — the balance shouldn't drop before the
+    /// money has actually left the account.
+    ///
+    /// This is specific to `Wallet.balance` (and anything built on it: `NetWorthCalculator`,
+    /// `WalletTransactionsView`'s running balance) — `BudgetCalculator.periodSpendingSummary`
+    /// ("Available to Spend"/"Safe to Spend") and every other spending total in the app
+    /// deliberately keep counting a future-dated entry immediately, as a safety net against
+    /// spending that already-committed money on something else before it's due. Those two
+    /// concepts (real current balance vs. planned available-to-spend) are allowed to disagree by
+    /// design; this function only ever changes the former.
     var balance: Decimal {
-        entries.reduce(startingBalance) { $0 + effect(of: $1) } + incomingTransfers.reduce(0) { $0 + effect(of: $1) }
+        balance(asOf: .now)
+    }
+
+    /// `Wallet.balance`, but as of an arbitrary point in time — exposed for testing (`asOf` a
+    /// fixed date rather than the real `.now`) and so any future caller needing "balance
+    /// including everything scheduled" vs. "balance as of a specific day" has a single shared
+    /// implementation rather than a second copy of this logic.
+    func balance(asOf date: Date, calendar: Calendar = .current) -> Decimal {
+        let cutoff = calendar.startOfDay(for: date)
+        let eligibleEntries = entries.filter { calendar.startOfDay(for: $0.date) <= cutoff }
+        let eligibleTransfers = incomingTransfers.filter { calendar.startOfDay(for: $0.date) <= cutoff }
+        return eligibleEntries.reduce(startingBalance) { $0 + effect(of: $1) } + eligibleTransfers.reduce(0) { $0 + effect(of: $1) }
     }
 
     /// False once the wallet has transactions on it (as source) or is the destination of a

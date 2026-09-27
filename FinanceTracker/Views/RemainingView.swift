@@ -60,15 +60,35 @@ struct RemainingView: View {
     private func otherRows(for summary: PeriodSpendingSummary) -> [OtherSpendingRow] {
         var rows: [OtherSpendingRow] = []
         if settings.includeUnplannedAsOtherExpenses && summary.otherExpensesTotal > 0 {
-            rows.append(OtherSpendingRow(title: "Other Expenses", amount: summary.otherExpensesTotal, icon: "questionmark.circle.fill"))
+            rows.append(OtherSpendingRow(
+                title: "Other Expenses", amount: summary.otherExpensesTotal, icon: "questionmark.circle.fill",
+                entries: otherExpenseEntries(in: summary)
+            ))
         }
         if settings.includeSavingsTransfers && summary.savingsTransfersTotal > 0 {
-            rows.append(OtherSpendingRow(title: "Savings Transfers", amount: summary.savingsTransfersTotal, icon: "banknote.fill"))
+            rows.append(OtherSpendingRow(title: "Savings Transfers", amount: summary.savingsTransfersTotal, icon: "banknote.fill", entries: nil))
         }
         if settings.includeDebtTransfers && summary.debtTransfersTotal > 0 {
-            rows.append(OtherSpendingRow(title: "Debt Payments", amount: summary.debtTransfersTotal, icon: "creditcard.fill"))
+            rows.append(OtherSpendingRow(title: "Debt Payments", amount: summary.debtTransfersTotal, icon: "creditcard.fill", entries: nil))
         }
         return rows
+    }
+
+    /// The exact transactions behind `summary.otherExpensesTotal` — mirrors
+    /// `BudgetCalculator.periodSpendingSummary`'s own "other" filter (no category at all, or a
+    /// category with a planned amount of 0 this period) exactly, using `summary.byCategory`'s
+    /// already-computed `planned` so a category's "is it budgeted" answer can never disagree
+    /// between the total shown and the list this drills into.
+    private func otherExpenseEntries(in summary: PeriodSpendingSummary) -> [Entry] {
+        allEntries
+            .inBudgetPeriod(month, startDay: settings.cycleStartDay)
+            .budgetEligible
+            .filter { entry in
+                guard entry.type == .expense else { return false }
+                guard let category = entry.category else { return true }
+                let planned = summary.byCategory.first { $0.category === category }?.planned ?? 0
+                return planned == 0
+            }
     }
 
     var body: some View {
@@ -160,6 +180,11 @@ private struct OtherSpendingRow: Identifiable {
     let title: String
     let amount: Decimal
     let icon: String
+    /// The transactions behind `amount`, when there's a meaningful list to drill into (currently
+    /// only "Other Expenses" — a mix of uncategorized and unbudgeted-category spend). `nil` for
+    /// "Savings Transfers"/"Debt Payments", which are a single transfer type rather than a bucket
+    /// of otherwise-unrelated categories, so the row stays a plain non-interactive summary there.
+    let entries: [Entry]?
 }
 
 private struct OtherSpendingCard: View {
@@ -173,18 +198,9 @@ private struct OtherSpendingCard: View {
 
             VStack(spacing: 0) {
                 ForEach(rows) { row in
-                    HStack(spacing: 12) {
-                        Image(systemName: row.icon)
-                            .foregroundStyle(.white.opacity(0.5))
-                            .frame(width: 20)
-                        Text(row.title)
-                            .foregroundStyle(.white)
-                        Spacer()
-                        Text(row.amount.currencyFormatted)
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, 12)
+                    rowContent(row)
+                        .padding(.horizontal)
+                        .padding(.vertical, 12)
 
                     if row.id != rows.last?.id {
                         Divider().background(Color.white.opacity(0.08)).padding(.leading, 44)
@@ -192,6 +208,38 @@ private struct OtherSpendingCard: View {
                 }
             }
             .surface(.primary, radius: ClarityRadius.medium, padding: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func rowContent(_ row: OtherSpendingRow) -> some View {
+        if let entries = row.entries {
+            NavigationLink {
+                CategoryEntriesDetailView(title: row.title, entries: entries)
+            } label: {
+                rowLabel(row)
+            }
+            .buttonStyle(.plain)
+        } else {
+            rowLabel(row)
+        }
+    }
+
+    private func rowLabel(_ row: OtherSpendingRow) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: row.icon)
+                .foregroundStyle(.white.opacity(0.5))
+                .frame(width: 20)
+            Text(row.title)
+                .foregroundStyle(.white)
+            Spacer()
+            Text(row.amount.currencyFormatted)
+                .foregroundStyle(.white.opacity(0.7))
+            if row.entries != nil {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
         }
     }
 }

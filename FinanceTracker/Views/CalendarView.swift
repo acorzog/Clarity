@@ -1,13 +1,17 @@
 import SwiftUI
 import SwiftData
 
-/// Clarity's "Money Calendar" — a month grid focused on daily spending. Tapping a day sets it as
-/// the persistent selection (shown via `selectionSummary` and a distinct highlight even after the
-/// detail sheet closes) and opens `DayEntriesView` for that day's full transaction list. Reuses
-/// `EntryQuerying`'s `.inMonth`/`.budgetEligible`/`.totalExpenses` exactly as every other spending
-/// calculation in the app does — this view derives no financial rule of its own, and month
-/// navigation is inherited from whatever `MonthSelector` already drives `month` (see
-/// `OverviewView`), not duplicated here.
+/// Clarity's "Money Calendar" — a month grid focused on daily spending, with income still visible
+/// on a day that had it: spending is always the primary read for a day (its own red tint and
+/// figure) since that's what this card exists to surface, but a day with income and no spending
+/// gets its own emerald tint and figure instead of reading as blank/no-activity, and a day with
+/// both keeps its spending figure with a small emerald dot marking that income happened too.
+/// Tapping a day sets it as the persistent selection (shown via `selectionSummary` and a distinct
+/// highlight even after the detail sheet closes) and opens `DayEntriesView` for that day's full
+/// transaction list. Reuses `EntryQuerying`'s `.inMonth`/`.budgetEligible`/`.totalExpenses`/
+/// `.totalIncome` exactly as every other spending/income calculation in the app does — this view
+/// derives no financial rule of its own, and month navigation is inherited from whatever
+/// `MonthSelector` already drives `month` (see `OverviewView`), not duplicated here.
 struct CalendarView: View {
     let month: Date
 
@@ -54,6 +58,21 @@ struct CalendarView: View {
         }
     }
 
+    /// Total budget-eligible income per day, same shape as `dailySpending` — restored so a day
+    /// with income (and no budget-eligible expense) still reads as an active day instead of being
+    /// indistinguishable from a day with nothing at all, and a day with both shows an income
+    /// indicator alongside its (still primary) spending tint. Excluded entries never count here,
+    /// same rule as `dailySpending` (`Models/BudgetEligibility.swift`).
+    private var dailyIncome: [Date: Decimal] {
+        Dictionary(grouping: monthEntries.budgetEligible.filter { $0.type == .income }) {
+            Calendar.current.startOfDay(for: $0.date)
+        }
+        .compactMapValues { entries in
+            let total = entries.totalIncome
+            return total > 0 ? total : nil
+        }
+    }
+
     /// Every entry for a day, unfiltered — an activity/transaction list reads every entry
     /// unconditionally, the same rule `Models/BudgetEligibility.swift` documents for Activity and
     /// CSV export. Only `dailySpending` above is budget-eligible-filtered; the day's own
@@ -66,6 +85,12 @@ struct CalendarView: View {
     /// day reads visibly (but still subtly) stronger than a small one.
     private var maxDailySpending: Decimal {
         dailySpending.values.max() ?? 0
+    }
+
+    /// Largest single day's income this month — mirrors `maxDailySpending`, scaling income-only
+    /// day tint intensity the same way spending days already scale.
+    private var maxDailyIncome: Decimal {
+        dailyIncome.values.max() ?? 0
     }
 
     private var weeks: [[Date?]] {
@@ -84,7 +109,9 @@ struct CalendarView: View {
                             DayCell(
                                 day: day,
                                 spent: day.flatMap { dailySpending[$0] },
+                                income: day.flatMap { dailyIncome[$0] },
                                 intensity: intensity(for: day),
+                                incomeIntensity: incomeIntensity(for: day),
                                 isToday: day.map { Calendar.current.isDateInToday($0) } ?? false,
                                 isSelected: day != nil && day == selectedDay
                             ) { tapped in
@@ -120,11 +147,17 @@ struct CalendarView: View {
     private var selectionSummary: some View {
         if let selectedDay {
             let spent = dailySpending[selectedDay]
+            let income = dailyIncome[selectedDay]
             HStack {
                 Text(selectionDateText(for: selectedDay))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.6))
                 Spacer()
+                if let income, income > 0 {
+                    Text("+\(income.currencyFormatted)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.emerald)
+                }
                 Text((spent ?? 0).currencyFormatted)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(spent != nil ? Color.expenseRed : Color.white.opacity(0.4))
@@ -143,6 +176,11 @@ struct CalendarView: View {
         return min((spent / maxDailySpending).doubleValue, 1)
     }
 
+    private func incomeIntensity(for day: Date?) -> Double {
+        guard let day, let income = dailyIncome[day], maxDailyIncome > 0 else { return 0 }
+        return min((income / maxDailyIncome).doubleValue, 1)
+    }
+
     private var weekdayHeader: some View {
         HStack(spacing: 6) {
             ForEach(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], id: \.self) { label in
@@ -157,7 +195,8 @@ struct CalendarView: View {
     private var legend: some View {
         HStack(spacing: 18) {
             legendItem(color: .expenseRed, label: "Spending")
-            legendItem(color: Color.white.opacity(0.15), label: "No spending")
+            legendItem(color: .emerald, label: "Income")
+            legendItem(color: Color.white.opacity(0.15), label: "No activity")
         }
     }
 
@@ -198,19 +237,33 @@ struct CalendarView: View {
 }
 
 extension CalendarView {
-    /// Combined VoiceOver label for one day cell — date + spending, never relying on color.
-    /// `spent == nil` (or `0`) means no budget-eligible expenses that day.
-    static func dayAccessibilityLabel(for day: Date, spent: Decimal?, calendar: Calendar = .current) -> String {
+    /// Combined VoiceOver label for one day cell — date + spending + income, never relying on
+    /// color. `spent`/`income == nil` (or `0`) means no budget-eligible expenses/income that day.
+    /// `income` defaults to `nil` so every existing call site that only ever tracked spending
+    /// keeps reading exactly as before ("no spending" when nothing was spent, regardless of income).
+    static func dayAccessibilityLabel(for day: Date, spent: Decimal?, income: Decimal? = nil, calendar: Calendar = .current) -> String {
         let dateText = day.formatted(.dateTime.month(.wide).day())
-        guard let spent, spent > 0 else { return "\(dateText), no spending" }
-        return "\(dateText), \(spent.currencyFormatted) spent"
+        let hasSpending = (spent ?? 0) > 0
+        let hasIncome = (income ?? 0) > 0
+        switch (hasSpending, hasIncome) {
+        case (true, true):
+            return "\(dateText), \(spent!.currencyFormatted) spent, \(income!.currencyFormatted) received"
+        case (true, false):
+            return "\(dateText), \(spent!.currencyFormatted) spent"
+        case (false, true):
+            return "\(dateText), \(income!.currencyFormatted) received"
+        case (false, false):
+            return "\(dateText), no spending"
+        }
     }
 }
 
 private struct DayCell: View {
     let day: Date?
     let spent: Decimal?
+    let income: Decimal?
     let intensity: Double
+    let incomeIntensity: Double
     let isToday: Bool
     let isSelected: Bool
     let onTap: (Date) -> Void
@@ -233,6 +286,12 @@ private struct DayCell: View {
                             .foregroundStyle(Color.expenseRed)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
+                    } else if let income, income > 0 {
+                        Text("+\(compactAmount(income))")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color.emerald)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     } else {
                         Text(" ").font(.footnote)
                     }
@@ -241,7 +300,7 @@ private struct DayCell: View {
                 .frame(height: 52)
                 .background {
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(spendTintColor)
+                        .fill(cellTintColor)
                         .overlay {
                             // A brighter wash distinguishes "selected" from a plain spend tint —
                             // fill, not another ring, so it never gets confused with `isToday`'s
@@ -250,6 +309,19 @@ private struct DayCell: View {
                                 RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.14))
                             }
                         }
+                }
+                .overlay(alignment: .topTrailing) {
+                    // A day with both spending and income still leads with the spending tint and
+                    // number — this card's primary read is "what did this day cost me" — but a
+                    // small dot keeps that day's income from disappearing entirely, matching this
+                    // view's original (pre-regression) income awareness without displacing spending
+                    // as the headline figure.
+                    if let spent, spent > 0, let income, income > 0 {
+                        Circle()
+                            .fill(Color.emerald)
+                            .frame(width: 6, height: 6)
+                            .padding(4)
+                    }
                 }
                 .overlay {
                     if isToday {
@@ -265,7 +337,7 @@ private struct DayCell: View {
             // §14/§16.
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(CalendarView.dayAccessibilityLabel(for: day, spent: spent))
+            .accessibilityLabel(CalendarView.dayAccessibilityLabel(for: day, spent: spent, income: income))
             .accessibilityAddTraits(isSelected ? .isSelected : [])
             .accessibilityHint("Double tap to view this day's transactions")
         } else {
@@ -276,10 +348,19 @@ private struct DayCell: View {
         }
     }
 
-    private var spendTintColor: Color {
-        guard let spent, spent > 0 else { return Color.white.opacity(0.05) }
-        let opacity = 0.12 + 0.28 * intensity
-        return Color.expenseRed.opacity(opacity)
+    /// Spending leads whenever it's present (this card's primary read), income tints the day only
+    /// when there was no spending at all, and a day with neither falls back to the neutral gray —
+    /// the same three-way precedence `compactAmount`'s sibling text logic above uses.
+    private var cellTintColor: Color {
+        if let spent, spent > 0 {
+            let opacity = 0.12 + 0.28 * intensity
+            return Color.expenseRed.opacity(opacity)
+        }
+        if let income, income > 0 {
+            let opacity = 0.12 + 0.28 * incomeIntensity
+            return Color.emerald.opacity(opacity)
+        }
+        return Color.white.opacity(0.05)
     }
 
     private func compactAmount(_ value: Decimal) -> String {

@@ -13,17 +13,26 @@ import Foundation
 // than a second copy of that logic. No financial calculation happens anywhere in this file: it
 // only ever decides *what* is being asked, never *how much* the answer is.
 
+/// What a semantic provider decided about one question — a closed, three-way outcome rather than a
+/// single "supported" bool, so "this is genuinely outside Clarity" (`.unsupported`) and "this is
+/// about Clarity data but too ambiguous to map safely" (`.needsClarification`) are never conflated.
+/// A provider (or a sampling fluke) guessing between two plausible readings of the same question —
+/// the instability this type exists to close off — must instead say so explicitly via
+/// `.needsClarification`, never silently pick one.
+enum AskClaritySemanticOutcome: Equatable {
+    case understood(AskClaritySemanticInterpretation)
+    case unsupported
+    case needsClarification
+}
+
 /// The tiny, fully-validated slice of `AskClarityQuery` a semantic interpretation is allowed to
 /// express — every field mirrors one the deterministic `AskClarityInterpreter` already recognizes,
 /// and nothing else (no raw text, no free-form fields). Built once, by
 /// `AskClaritySemanticResponseParser.parse(_:)`, from a provider's raw output; every field is
 /// already checked against this app's real vocabulary by the time this struct exists, so nothing
-/// downstream needs to "trust the model."
+/// downstream needs to "trust the model." Only ever exists wrapped in `AskClaritySemanticOutcome.
+/// understood` — there is no "unsupported" instance of this type any more (see `AskClaritySemanticOutcome`).
 struct AskClaritySemanticInterpretation: Equatable {
-    /// `false` means "the provider couldn't confidently map this question onto Clarity's own
-    /// vocabulary" — every other field is left at its default in that case, and
-    /// `AskClaritySemanticQueryBuilder` refuses to build anything from it.
-    let supported: Bool
     let metric: AskClarityMetric?
     /// Must exactly name one of the categories/head categories this app actually has — resolved
     /// through the exact same `AskClarityInterpreter.matchCategoryName` the deterministic path
@@ -39,12 +48,6 @@ struct AskClaritySemanticInterpretation: Equatable {
     let wantsTransactionRanking: Bool
     let wantsAssessment: Bool
     let comparisonRequested: Bool
-
-    static let unsupported = AskClaritySemanticInterpretation(
-        supported: false, metric: nil, categoryName: nil, period: nil, ranking: nil, budgetState: nil,
-        wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-        wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-    )
 }
 
 /// The period half of `AskClaritySemanticInterpretation` — its own small enum (not a raw
@@ -106,14 +109,17 @@ enum AskClaritySemanticNamedPeriod: String, Equatable {
 /// Once a `AskClarityQuery` comes out of this, it is indistinguishable from one the deterministic
 /// interpreter built, and is handled by `AskClarityPlanner`/`AskClarityExecutor` identically.
 enum AskClaritySemanticQueryBuilder {
+    /// `question` is the original raw text — used only to enforce `AskClaritySemanticAmbiguityRules`
+    /// (e.g. forcing "recently"/"lately"/"recent" to the same fixed period regardless of what the
+    /// provider itself returned for `interpretation.period`); it plays no other role here and is
+    /// never sent anywhere past this point.
     static func buildQuery(
         from interpretation: AskClaritySemanticInterpretation,
+        question: String,
         categories: [Category],
         today: Date,
         calendar: Calendar = .current
     ) -> AskClarityQuery? {
-        guard interpretation.supported else { return nil }
-
         var query = AskClarityQuery()
         query.metric = interpretation.metric
         query.ranking = interpretation.ranking
@@ -139,8 +145,9 @@ enum AskClaritySemanticQueryBuilder {
             query.categoryMatch = match
         }
 
-        if let period = interpretation.period {
-            guard let periodMatch = resolvePeriod(period, today: today, calendar: calendar) else { return nil }
+        let stabilizedPeriod = AskClaritySemanticAmbiguityRules.stabilizedPeriod(interpretation.period, forQuestion: question)
+        if let stabilizedPeriod {
+            guard let periodMatch = resolvePeriod(stabilizedPeriod, today: today, calendar: calendar) else { return nil }
             query.periodMatch = periodMatch
         }
 
@@ -194,6 +201,33 @@ enum AskClaritySemanticQueryBuilder {
     }
 }
 
+// MARK: - Ambiguity stabilization
+
+/// Fixed, code-level (not prompt-level) rules for words whose calendar meaning must never depend
+/// on model sampling. `AskClaritySemanticRequestBuilder.instructions` already tells the model the
+/// same rule, but wording alone only makes a period *likely* consistent across calls (even at
+/// temperature 0, the API gives no hard determinism guarantee) — this enum makes it *actually*
+/// consistent, by overriding whatever period a provider returned whenever one of these words is
+/// present, rather than trusting the model to have applied its own instructions correctly and
+/// identically every time. This is the single place "same question -> same query" is enforced.
+enum AskClaritySemanticAmbiguityRules {
+    /// "recently"/"lately"/"recent" have no single safe meaning across Clarity's period vocabulary
+    /// (a plausible reading could span days or months) — Clarity fixes them, once, to `thisWeek`:
+    /// short enough to actually mean "recently," never `thisWeekend`/`thisMonth`/anything else.
+    private static let fixedRecentPeriodWords: Set<String> = ["recently", "lately", "recent"]
+    private static let fixedRecentPeriod = AskClaritySemanticPeriod.named(.thisWeek)
+
+    /// Returns `interpretation.period` unchanged unless `question` contains one of the fixed-period
+    /// trigger words as a whole word, in which case it always returns the same fixed period —
+    /// regardless of what the provider itself claimed, and regardless of whether the provider named
+    /// a period at all.
+    static func stabilizedPeriod(_ period: AskClaritySemanticPeriod?, forQuestion question: String) -> AskClaritySemanticPeriod? {
+        let words = Set(question.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
+        guard words.contains(where: fixedRecentPeriodWords.contains) else { return period }
+        return fixedRecentPeriod
+    }
+}
+
 // MARK: - Provider abstraction
 
 /// What a semantic provider needs to classify one question — deliberately tiny: the raw question,
@@ -216,7 +250,10 @@ struct AskClaritySemanticContext {
 /// return `nil`) and must never retry internally — `AskClarityEngine.respondWithSemanticFallback`
 /// already calls this at most once per question.
 protocol AskClaritySemanticProviding {
-    func interpret(context: AskClaritySemanticContext) async -> AskClaritySemanticInterpretation?
+    /// `nil` means the provider itself failed (network error, missing key, malformed reply) — a
+    /// genuinely indeterminate result, distinct from `.unsupported`/`.needsClarification`, which
+    /// are valid, confident answers the provider gave about the question itself.
+    func interpret(context: AskClaritySemanticContext) async -> AskClaritySemanticOutcome?
 }
 
 /// Hard caps on what a single semantic-interpretation call can cost, independent of which

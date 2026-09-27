@@ -28,16 +28,60 @@ struct CategoryEntriesDetailView: View {
         entries.sorted { $0.date > $1.date }
     }
 
+    /// Sum of every entry this list actually shows — always available regardless of `category`/
+    /// `month`, unlike `planned` below (which needs both to mean anything).
+    private var spent: Decimal {
+        entries.reduce(Decimal(0)) { $0 + $1.amount }
+    }
+
+    /// The planned amount for this category/month, only when both are known — `nil` (not just
+    /// zero) for a caller like "Other Expenses" that spans many categories at once, where a
+    /// single "planned" figure wouldn't mean anything.
+    private var planned: Decimal? {
+        guard let category, let month else { return nil }
+        return allBudgets.amount(for: category, month: month)
+    }
+
+    private var isOverBudget: Bool {
+        guard let planned else { return false }
+        return spent > planned
+    }
+
     var body: some View {
-        Group {
+        // Always a `List` (never swapped out for `EmptyStateView`), so the Spent/Planned header
+        // below stays visible even with zero transactions this period — an unbudgeted category
+        // with no spending yet should still read as "0,00 €/0,00 €", not disappear entirely.
+        List {
+            // Only shown when there's a real, single planned amount to compare against (see
+            // `planned`'s own doc comment) — this is exactly what the Remaining drill-down needs
+            // so the "in budget or over" answer doesn't require backing out to the Remaining
+            // list to check. Shown even when `planned == 0` (an unbudgeted category that still
+            // has spending against it, e.g. Cash/Colombia/Autónomo in Remaining's "Outcomes"
+            // section) — that is precisely the "spent something against nothing planned, and
+            // it's all over budget" case this header exists to surface.
+            if let planned {
+                Section {
+                    HStack {
+                        Text("Left / Planned")
+                            .foregroundStyle(.white.opacity(0.6))
+                        Spacer()
+                        Text("\((planned - spent).currencyFormatted)/\(planned.currencyFormatted)")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(isOverBudget ? Color.expenseRed : Color.emerald)
+                    }
+                }
+                .listRowBackground(Color.white.opacity(0.05))
+            }
+
             if sortedEntries.isEmpty {
-                EmptyStateView(
-                    icon: "tray",
-                    title: "No Entries",
-                    message: "No transactions here yet."
-                )
+                Section {
+                    Text("No transactions here yet.")
+                        .foregroundStyle(.white.opacity(0.4))
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .listRowBackground(Color.clear)
             } else {
-                List {
+                Section {
                     ForEach(sortedEntries) { entry in
                         Button {
                             editingEntry = entry
@@ -63,10 +107,10 @@ struct CategoryEntriesDetailView: View {
                         }
                     }
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
             }
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .background(Color.appBackground.ignoresSafeArea())
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

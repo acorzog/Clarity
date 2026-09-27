@@ -7,16 +7,22 @@ struct WalletTransactionsView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var editingEntry: Entry?
 
-    /// Each entry touching this wallet paired with the wallet's balance immediately after it,
-    /// walking backward from the current balance through the (already newest-first) entries.
+    /// Each entry touching this wallet paired with the wallet's balance immediately after it —
+    /// computed by walking forward in true chronological order (oldest first) from
+    /// `startingBalance`, then reversed for newest-first display. This naturally gives a
+    /// future-dated entry (see `Wallet.balance`'s own doc comment) its correct *projected*
+    /// balance — what the balance becomes once that entry's date arrives — while the row for
+    /// whichever entry is the most recent one dated today or earlier lines up exactly with
+    /// `Wallet.balance` itself, since both accumulate the same entries with the same
+    /// `effect(of:)` from the same starting point, just in opposite directions.
     private var rows: [(entry: Entry, balance: Decimal)] {
-        var running = wallet.balance
+        var running = wallet.startingBalance
         var result: [(entry: Entry, balance: Decimal)] = []
-        for entry in wallet.allEntries {
+        for entry in wallet.allEntries.reversed() {
+            running += wallet.effect(of: entry)
             result.append((entry, running))
-            running -= wallet.effect(of: entry)
         }
-        return result
+        return result.reversed()
     }
 
     private var groupedByDay: [(day: Date, rows: [(entry: Entry, balance: Decimal)])] {

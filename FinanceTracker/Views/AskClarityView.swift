@@ -21,14 +21,21 @@ private let exampleQuestions = [
     "How much do I have left to spend?"
 ]
 
-/// "Ask Clarity": a local, deterministic Q&A screen over the app's own data. Reuses
+/// "Ask Clarity": a Q&A screen over the app's own data, local-first by design. Reuses
 /// `AskClarityEngine`, which itself reuses `BudgetCalculator`/`OverviewCalculator`/
-/// `ExplainMyMonthCalculator`, so nothing here recomputes spend/budget math. Understands a broad,
-/// compositional set of questions (metric + category + time period + ranking + comparison, etc. —
-/// see `AskClarityInterpreter`) rather than a fixed list of whole sentences, and keeps lightweight
-/// session-only context (last category/metric/period) so follow-ups like "and last month?" work.
-/// Still never calls an external AI service, and never guesses past an ambiguous or unmatched
-/// category — this is a broader deterministic query system, not an open chatbot.
+/// `ExplainMyMonthCalculator`, so nothing here — local or Claude-assisted — ever recomputes
+/// spend/budget math; every number always comes from `AskClarityPlanner`/`AskClarityExecutor`.
+/// Understands a broad, compositional set of questions (metric + category + time period + ranking
+/// + comparison, etc. — see `AskClarityInterpreter`) rather than a fixed list of whole sentences,
+/// and keeps lightweight session-only context (last category/metric/period) so follow-ups like
+/// "and last month?" work, whether or not a previous turn used Claude.
+///
+/// Claude is consulted in two narrow, optional, fail-safe roles — never to compute a figure, never
+/// as an open chatbot — see `performAsk`'s doc comment for the full pipeline:
+///  - **Semantic interpretation fallback**, only when the local deterministic interpreter finds no
+///    signal at all in a question — it still never guesses past an ambiguous or unmatched category.
+///  - **Response phrasing**, an optional wording pass over an already-fully-verified answer, kept
+///    honest by `AskClarityPhrasingFidelity`.
 struct AskClarityView: View {
     @ObservedObject private var budgetSettings = BudgetSettingsStore.shared
     @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
@@ -40,6 +47,22 @@ struct AskClarityView: View {
     /// Session-only memory of the last resolved subject — reset whenever this view is recreated
     /// (e.g. leaving and reopening More → Ask Clarity). Never written to `UserDefaults`/SwiftData.
     @State private var context = AskClaritySessionContext.empty
+    /// True only while a question is awaiting `AskClarityEngine.respondWithSemanticFallback` — the
+    /// local deterministic pass is synchronous and never sets this; it's set right before that call
+    /// and cleared right after, purely to drive the typing indicator and prevent overlapping asks.
+    @State private var isAsking = false
+    /// Caps LLM calls across this whole conversation — both interpretation and phrasing calls
+    /// share this single budget, not just per question — reset alongside `context` by "New
+    /// conversation" so a fresh session gets a fresh budget.
+    @State private var callBudget = AskClaritySemanticCallBudget()
+    /// The one Anthropic provider in the app, conforming to both `AskClaritySemanticProviding`
+    /// (interpretation fallback) and `AskClarityPhrasingProviding` (response phrasing) — genuinely
+    /// one instance serving both purposes, not two, so the two calls a single question can trigger
+    /// share the same networking/session underneath. Declared as the concrete type so it can be
+    /// passed directly wherever either protocol is expected; kept as one `private let` so it can be
+    /// swapped for stubs in tests without touching this view (tests drive `AskClarityEngine`'s
+    /// functions directly with `StubSemanticProvider`/`StubPhrasingProvider` instead).
+    private let anthropicProvider = AnthropicClaritySemanticProvider()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,6 +83,10 @@ struct AskClarityView: View {
                             AskClarityTurnView(turn: turn, onTapFollowUp: ask)
                                 .id(turn.id)
                         }
+
+                        if isAsking {
+                            typingIndicator
+                        }
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
@@ -69,6 +96,10 @@ struct AskClarityView: View {
                 .onChange(of: conversation.count) { _, _ in
                     guard let last = conversation.last else { return }
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+                .onChange(of: isAsking) { _, nowAsking in
+                    guard nowAsking else { return }
+                    withAnimation { proxy.scrollTo("askClarityTypingIndicator", anchor: .bottom) }
                 }
             }
 
@@ -87,12 +118,14 @@ struct AskClarityView: View {
                         withAnimation {
                             conversation = []
                             context = .empty
+                            callBudget = AskClaritySemanticCallBudget()
                         }
                     } label: {
                         Label("New conversation", systemImage: "square.and.pencil")
                             .labelStyle(.iconOnly)
                     }
                     .accessibilityLabel("Start a new conversation")
+                    .disabled(isAsking)
                 }
             }
         }
@@ -113,9 +146,28 @@ struct AskClarityView: View {
                             .background(Color.surfaceSecondary, in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    .disabled(isAsking)
                 }
             }
         }
+    }
+
+    /// Shown only while `isAsking` is true, appended after the last real turn — a lightweight
+    /// "Clarity is thinking…" affordance covering `performAsk`'s whole round-trip, which may
+    /// include a semantic interpretation call, a phrasing call, both, or neither (the fully local
+    /// deterministic pass alone never takes long enough to need this indicator).
+    private var typingIndicator: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .tint(.textSecondary)
+            Text("Clarity is thinking…")
+                .font(.caption)
+                .foregroundStyle(.textSecondary)
+        }
+        .padding(14)
+        .background(Color.surfaceSecondary, in: RoundedRectangle(cornerRadius: 14))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .id("askClarityTypingIndicator")
     }
 
     private var inputBar: some View {
@@ -124,15 +176,21 @@ struct AskClarityView: View {
                 .foregroundStyle(.textPrimary)
                 .submitLabel(.send)
                 .onSubmit(submit)
+                .disabled(isAsking)
                 .padding(10)
                 .background(Color.surfaceSecondary, in: RoundedRectangle(cornerRadius: 12))
 
             Button(action: submit) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(canSubmit ? AnyShapeStyle(LinearGradient.emeraldSky) : AnyShapeStyle(Color.textDisabled))
+                if isAsking {
+                    ProgressView()
+                        .font(.title2)
+                } else {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(canSubmit ? AnyShapeStyle(LinearGradient.emeraldSky) : AnyShapeStyle(Color.textDisabled))
+                }
             }
-            .disabled(!canSubmit)
+            .disabled(!canSubmit || isAsking)
         }
         .padding(12)
         .background(Color.appBackground)
@@ -144,18 +202,60 @@ struct AskClarityView: View {
 
     private func submit() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !isAsking else { return }
         ask(text)
         inputText = ""
     }
 
+    /// Fires the async ask flow from a synchronous SwiftUI action closure (button taps, `onSubmit`,
+    /// follow-up chips). `performAsk` itself guards against overlap, so a stray double-tap here
+    /// just no-ops on the second call rather than firing a second request.
     private func ask(_ text: String) {
-        let result = AskClarityEngine.respond(
+        Task { await performAsk(text) }
+    }
+
+    /// The full pipeline, in order:
+    ///  1. **Local interpretation** — `AskClarityEngine.respondWithSemanticFallback` always tries
+    ///     the fully local, deterministic `AskClarityInterpreter` first, synchronously, at zero API
+    ///     cost.
+    ///  2. **Claude semantic fallback**, only if step 1 found no signal at all in the question — at
+    ///     most one call, gated by `callBudget`.
+    ///  3. **Planner → Executor**, unchanged either way — the same calculators produce the same
+    ///     kind of verified `AskClarityAnswer` regardless of which interpreter (local or Claude)
+    ///     recognized the question. Step 1 already does this internally once a query exists.
+    ///  4. **Claude response phrasing** (`AskClarityEngine.phrasedNaturally`) — takes the answer
+    ///     from step 3 and optionally rewords it, at most one further call, sharing the exact same
+    ///     `callBudget` as step 2. It receives *only* that answer's own display text and the
+    ///     question — never a transaction, `Category`/`Entry` object, or any other raw financial
+    ///     data (see `AskClarityPhrasingContext`).
+    ///  5. **Fidelity validation** — every candidate rephrasing is checked by
+    ///     `AskClarityPhrasingFidelity.preservesFacts` before ever being shown; a failure (or a
+    ///     provider failure) falls back to step 3's original deterministic answer untouched.
+    ///
+    /// Every field the final answer is built from (amounts, totals, budget health) still comes
+    /// entirely from `entries`/`budgets`/`headCategories` via `AskClarityPlanner`/`AskClarityExecutor`
+    /// — Claude only ever chooses *which* query to run (step 2) or *how the already-verified answer
+    /// reads* (step 4), never *what the numbers are*. `context` is threaded from step 1/3 only —
+    /// phrasing never touches it, so follow-ups work identically whether or not the previous turn
+    /// went through Claude at any point. If either Claude call is unavailable, times out, or
+    /// returns anything invalid, the existing deterministic answer is shown instead — no separate
+    /// error UI, since that answer already reads as a clear, honest response on its own.
+    private func performAsk(_ text: String) async {
+        guard !isAsking else { return }
+        isAsking = true
+        let settings = BudgetCalculationSettings(from: budgetSettings)
+
+        let deterministicResult = await AskClarityEngine.respondWithSemanticFallback(
             to: text, context: context, entries: allEntries, budgets: allBudgets, headCategories: headCategories,
-            settings: BudgetCalculationSettings(from: budgetSettings)
+            settings: settings, semanticProvider: anthropicProvider, callBudget: callBudget
         )
-        context = result.updatedContext
-        conversation.append(AskClarityTurn(question: text, answer: result.answer))
+        let finalResult = await AskClarityEngine.phrasedNaturally(
+            deterministicResult, question: text, phrasingProvider: anthropicProvider, callBudget: callBudget
+        )
+
+        context = finalResult.updatedContext
+        conversation.append(AskClarityTurn(question: text, answer: finalResult.answer))
+        isAsking = false
     }
 }
 

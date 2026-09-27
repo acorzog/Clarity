@@ -77,4 +77,59 @@ final class CalendarAccessibilityTests: XCTestCase {
         XCTAssertTrue(noSpending.contains("no spending"))
         XCTAssertTrue(spent.contains("spent"))
     }
+
+    // MARK: - Income (restored after the "Money Calendar" rewrite dropped it entirely)
+
+    /// `income` defaults to `nil` — every call site above that never passes it keeps reading
+    /// exactly as before regardless of this change, since a nil/omitted `income` behaves
+    /// identically to an explicit `income: nil`.
+    func testOmittingIncomeEntirelyBehavesIdenticallyToPassingNil() {
+        let day = testDate(2026, 9, 16)
+        XCTAssertEqual(
+            CalendarView.dayAccessibilityLabel(for: day, spent: nil),
+            CalendarView.dayAccessibilityLabel(for: day, spent: nil, income: nil)
+        )
+        XCTAssertEqual(
+            CalendarView.dayAccessibilityLabel(for: day, spent: 30),
+            CalendarView.dayAccessibilityLabel(for: day, spent: 30, income: nil)
+        )
+    }
+
+    func testIncomeOnlyDayProducesAReceivedLabelNotNoSpending() {
+        let day = testDate(2026, 9, 16)
+        let income: Decimal = 2500
+        let label = CalendarView.dayAccessibilityLabel(for: day, spent: nil, income: income)
+        XCTAssertEqual(label, "\(dateText(day)), \(income.currencyFormatted) received")
+        XCTAssertFalse(label.contains("no spending"), "an income-only day must not read as having no activity")
+    }
+
+    func testZeroIncomeIsTreatedTheSameAsNilIncome() {
+        let day = testDate(2026, 9, 16)
+        XCTAssertEqual(
+            CalendarView.dayAccessibilityLabel(for: day, spent: nil, income: 0),
+            CalendarView.dayAccessibilityLabel(for: day, spent: nil, income: nil)
+        )
+    }
+
+    func testADayWithBothSpendingAndIncomeMentionsBoth() {
+        let day = testDate(2026, 9, 16)
+        let spent: Decimal = 45
+        let income: Decimal = 2500
+        let label = CalendarView.dayAccessibilityLabel(for: day, spent: spent, income: income)
+        XCTAssertTrue(label.contains("\(spent.currencyFormatted) spent"), label)
+        XCTAssertTrue(label.contains("\(income.currencyFormatted) received"), label)
+    }
+
+    /// The three active states (spending only / income only / both) must each be distinguishable
+    /// from one another and from "no spending" purely by their text.
+    func testSpendingOnlyIncomeOnlyAndBothAreAllDistinctLabels() {
+        let day = testDate(2026, 9, 16)
+        let none = CalendarView.dayAccessibilityLabel(for: day, spent: nil, income: nil)
+        let spendingOnly = CalendarView.dayAccessibilityLabel(for: day, spent: 45, income: nil)
+        let incomeOnly = CalendarView.dayAccessibilityLabel(for: day, spent: nil, income: 2500)
+        let both = CalendarView.dayAccessibilityLabel(for: day, spent: 45, income: 2500)
+
+        let all = [none, spendingOnly, incomeOnly, both]
+        XCTAssertEqual(Set(all).count, all.count, "all four states must be distinguishable: \(all)")
+    }
 }

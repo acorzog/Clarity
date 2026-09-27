@@ -25,19 +25,43 @@ private func testSettings(
 
 private let today = testDate(2025, 6, 20)
 
+/// A "supported=true but every field left at default" interpretation — a convenience for tests
+/// that only care about a handful of fields, since `AskClaritySemanticInterpretation` no longer
+/// has a `supported` field to construct around (see `AskClaritySemanticOutcome`).
+private func blankInterpretation(
+    metric: AskClarityMetric? = nil,
+    categoryName: String? = nil,
+    period: AskClaritySemanticPeriod? = nil,
+    ranking: AskClarityRanking? = nil,
+    budgetState: AskClarityBudgetStateQuery? = nil,
+    wantsBreakdown: Bool = false,
+    wantsTrend: Bool = false,
+    trendSpan: Int? = nil,
+    wantsList: Bool = false,
+    wantsTransactionRanking: Bool = false,
+    wantsAssessment: Bool = false,
+    comparisonRequested: Bool = false
+) -> AskClaritySemanticInterpretation {
+    AskClaritySemanticInterpretation(
+        metric: metric, categoryName: categoryName, period: period, ranking: ranking, budgetState: budgetState,
+        wantsBreakdown: wantsBreakdown, wantsTrend: wantsTrend, trendSpan: trendSpan, wantsList: wantsList,
+        wantsTransactionRanking: wantsTransactionRanking, wantsAssessment: wantsAssessment, comparisonRequested: comparisonRequested
+    )
+}
+
 /// Records every call it receives and returns a fixed, injected result — never touches the
 /// network. Lets tests drive `AskClarityEngine.respondWithSemanticFallback` deterministically and
 /// verify exactly how many times (if any) the semantic layer was actually consulted.
 private final class StubSemanticProvider: AskClaritySemanticProviding {
-    private let result: AskClaritySemanticInterpretation?
+    private let result: AskClaritySemanticOutcome?
     private(set) var callCount = 0
     private(set) var lastContext: AskClaritySemanticContext?
 
-    init(result: AskClaritySemanticInterpretation?) {
+    init(result: AskClaritySemanticOutcome?) {
         self.result = result
     }
 
-    func interpret(context: AskClaritySemanticContext) async -> AskClaritySemanticInterpretation? {
+    func interpret(context: AskClaritySemanticContext) async -> AskClaritySemanticOutcome? {
         callCount += 1
         lastContext = context
         return result
@@ -49,15 +73,14 @@ private final class StubSemanticProvider: AskClaritySemanticProviding {
 final class AskClaritySemanticResponseParserTests: XCTestCase {
     func testValidJSONParsesEveryField() {
         let json = """
-        {"supported":true,"metric":"spending","categoryName":"Restaurants",\
+        {"result":"understood","metric":"spending","categoryName":"Restaurants",\
         "period":{"kind":"named","value":"thisMonth"},"ranking":null,"budgetState":null,\
         "wantsBreakdown":false,"wantsTrend":false,"trendSpan":null,"wantsList":false,\
         "wantsTransactionRanking":false,"wantsAssessment":false,"comparisonRequested":true}
         """
-        guard let result = AskClaritySemanticResponseParser.parse(json) else {
-            return XCTFail("valid JSON should parse")
+        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
+            return XCTFail("valid JSON should parse to .understood")
         }
-        XCTAssertTrue(result.supported)
         XCTAssertEqual(result.metric, .spending)
         XCTAssertEqual(result.categoryName, "Restaurants")
         XCTAssertEqual(result.period, .named(.thisMonth))
@@ -67,8 +90,11 @@ final class AskClaritySemanticResponseParserTests: XCTestCase {
     func testSurroundingProseAroundTheJSONObjectIsIgnored() {
         // Mirrors `CategorizationService.parseExtraction`'s own tolerance for a model that adds
         // stray text around the JSON despite being asked not to.
-        let text = "Sure, here you go:\n{\"supported\":true,\"metric\":\"income\"} — hope that helps!"
-        XCTAssertEqual(AskClaritySemanticResponseParser.parse(text)?.metric, .income)
+        let text = "Sure, here you go:\n{\"result\":\"understood\",\"metric\":\"income\"} — hope that helps!"
+        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(text) else {
+            return XCTFail("should still parse to .understood")
+        }
+        XCTAssertEqual(result.metric, .income)
     }
 
     func testCompletelyNonJSONTextReturnsNil() {
@@ -80,26 +106,38 @@ final class AskClaritySemanticResponseParserTests: XCTestCase {
     }
 
     func testTruncatedJSONReturnsNil() {
-        XCTAssertNil(AskClaritySemanticResponseParser.parse("{\"supported\":true,\"metric\":\"spend"))
+        XCTAssertNil(AskClaritySemanticResponseParser.parse("{\"result\":\"understood\",\"metric\":\"spend"))
     }
 
-    func testMissingRequiredSupportedFieldReturnsNil() {
+    func testMissingRequiredResultFieldReturnsNil() {
         XCTAssertNil(AskClaritySemanticResponseParser.parse("{\"metric\":\"spending\"}"))
     }
 
-    func testSupportedFalseIgnoresEveryOtherField() {
-        // Even if a model sets supported=false but still fills in other fields (contradictory
-        // output), the parser must not act on any of them.
-        let json = "{\"supported\":false,\"metric\":\"spending\",\"categoryName\":\"Anything\"}"
-        let result = AskClaritySemanticResponseParser.parse(json)
-        XCTAssertEqual(result, .unsupported)
+    func testResultUnsupportedIgnoresEveryOtherField() {
+        // Even if a model sets result=unsupported but still fills in other fields (contradictory
+        // output), the parser must not act on any of them — `.unsupported` carries no fields at all.
+        let json = "{\"result\":\"unsupported\",\"metric\":\"spending\",\"categoryName\":\"Anything\"}"
+        XCTAssertEqual(AskClaritySemanticResponseParser.parse(json), .unsupported)
+    }
+
+    /// The new three-way outcome this phase adds: an in-scope-but-ambiguous question must produce
+    /// its own distinct result, never silently folded into `.unsupported` or a guessed `.understood`.
+    func testResultNeedsClarificationIsReturnedAsItsOwnDistinctOutcome() {
+        let json = "{\"result\":\"needsClarification\",\"metric\":\"spending\"}"
+        XCTAssertEqual(AskClaritySemanticResponseParser.parse(json), .needsClarification)
+    }
+
+    /// A hallucinated "result" value outside the fixed three — never guessed at; treated exactly
+    /// like a provider failure (nil), not defaulted to any of the three real outcomes.
+    func testUnrecognizedResultValueReturnsNilRatherThanGuessingAnOutcome() {
+        XCTAssertNil(AskClaritySemanticResponseParser.parse("{\"result\":\"maybe\"}"))
     }
 
     /// A hallucinated enum value outside the vocabulary given in the prompt — must be dropped
     /// (treated as "not mentioned"), never passed through as if it were real.
     func testUnrecognizedEnumValueIsDroppedNotGuessed() {
-        let json = "{\"supported\":true,\"metric\":\"cryptocurrency\",\"ranking\":\"medium\"}"
-        guard let result = AskClaritySemanticResponseParser.parse(json) else {
+        let json = "{\"result\":\"understood\",\"metric\":\"cryptocurrency\",\"ranking\":\"medium\"}"
+        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
             return XCTFail("should still parse — just with the bad fields dropped")
         }
         XCTAssertNil(result.metric)
@@ -107,18 +145,24 @@ final class AskClaritySemanticResponseParserTests: XCTestCase {
     }
 
     func testUnrecognizedPeriodKindIsDropped() {
-        let json = "{\"supported\":true,\"period\":{\"kind\":\"nextDecade\",\"value\":\"today\"}}"
-        XCTAssertNil(AskClaritySemanticResponseParser.parse(json)?.period)
+        let json = "{\"result\":\"understood\",\"period\":{\"kind\":\"nextDecade\",\"value\":\"today\"}}"
+        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
+            return XCTFail("should still parse")
+        }
+        XCTAssertNil(result.period)
     }
 
     func testNamedPeriodWithMissingValueIsDropped() {
-        let json = "{\"supported\":true,\"period\":{\"kind\":\"named\"}}"
-        XCTAssertNil(AskClaritySemanticResponseParser.parse(json)?.period)
+        let json = "{\"result\":\"understood\",\"period\":{\"kind\":\"named\"}}"
+        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
+            return XCTFail("should still parse")
+        }
+        XCTAssertNil(result.period)
     }
 
     func testDateRangePeriodParsesBothDates() {
-        let json = "{\"supported\":true,\"period\":{\"kind\":\"dateRange\",\"startDate\":\"2025-09-05\",\"endDate\":\"2025-09-18\"}}"
-        guard case .dateRange(let start, let end) = AskClaritySemanticResponseParser.parse(json)?.period else {
+        let json = "{\"result\":\"understood\",\"period\":{\"kind\":\"dateRange\",\"startDate\":\"2025-09-05\",\"endDate\":\"2025-09-18\"}}"
+        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json), case .dateRange(let start, let end) = result.period else {
             return XCTFail("should parse a dateRange period")
         }
         XCTAssertEqual(start, "2025-09-05")
@@ -126,31 +170,29 @@ final class AskClaritySemanticResponseParserTests: XCTestCase {
     }
 
     func testTrendSpanIsClampedToASaneRange() {
-        let json = "{\"supported\":true,\"wantsTrend\":true,\"trendSpan\":9999}"
-        XCTAssertEqual(AskClaritySemanticResponseParser.parse(json)?.trendSpan, 24)
+        let json = "{\"result\":\"understood\",\"wantsTrend\":true,\"trendSpan\":9999}"
+        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
+            return XCTFail("should still parse")
+        }
+        XCTAssertEqual(result.trendSpan, 24)
     }
 
     func testEmptyCategoryNameIsTreatedAsNilNotAnEmptyMatch() {
-        let json = "{\"supported\":true,\"categoryName\":\"   \"}"
-        XCTAssertNil(AskClaritySemanticResponseParser.parse(json)?.categoryName)
+        let json = "{\"result\":\"understood\",\"categoryName\":\"   \"}"
+        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
+            return XCTFail("should still parse")
+        }
+        XCTAssertNil(result.categoryName)
     }
 }
 
 // MARK: - Query building (Claude output -> AskClarityQuery -> existing Planner/Executor)
 
 final class AskClaritySemanticQueryBuilderTests: XCTestCase {
-    func testUnsupportedInterpretationProducesNoQuery() {
-        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: .unsupported, categories: [], today: today))
-    }
-
-    func testValidInterpretationWithNoSignalProducesNoQuery() {
-        // supported=true but every field left at its default — nothing to actually plan.
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: nil, categoryName: nil, period: nil, ranking: nil, budgetState: nil,
-            wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, categories: [], today: today))
+    func testInterpretationWithNoSignalProducesNoQuery() {
+        // Every field left at its default — nothing to actually plan.
+        let interpretation = blankInterpretation()
+        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "test", categories: [], today: today))
     }
 
     func testCategoryNameThatMatchesARealCategoryResolvesToIt() {
@@ -159,12 +201,8 @@ final class AskClaritySemanticQueryBuilderTests: XCTestCase {
         let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
         context.insert(head); context.insert(restaurants)
 
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth), ranking: nil,
-            budgetState: nil, wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, categories: [restaurants], today: today) else {
+        let interpretation = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "how much on restaurants this month", categories: [restaurants], today: today) else {
             return XCTFail("should build a query")
         }
         guard case .resolved(let category) = query.categoryMatch else { return XCTFail("category should resolve") }
@@ -178,21 +216,13 @@ final class AskClaritySemanticQueryBuilderTests: XCTestCase {
     /// at or silently dropped in favor of an unscoped question — the whole interpretation is
     /// rejected instead, exactly like the deterministic interpreter's own "notFound" rule.
     func testHallucinatedCategoryNameProducesNoQuery() {
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: "Nonexistent Category", period: nil, ranking: nil,
-            budgetState: nil, wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, categories: [], today: today))
+        let interpretation = blankInterpretation(metric: .spending, categoryName: "Nonexistent Category")
+        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "test", categories: [], today: today))
     }
 
     func testSpecificMonthPeriodResolvesTheSameWayTheLocalInterpreterDoes() {
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: nil, period: .specificMonth(monthName: "September"),
-            ranking: nil, budgetState: nil, wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, categories: [], today: today) else {
+        let interpretation = blankInterpretation(metric: .spending, period: .specificMonth(monthName: "September"))
+        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "how much in september", categories: [], today: today) else {
             return XCTFail("should build a query")
         }
         guard case .supported(let period) = query.periodMatch, case .specificMonth(let date) = period.kind else {
@@ -204,22 +234,13 @@ final class AskClaritySemanticQueryBuilderTests: XCTestCase {
     }
 
     func testUnrecognizedMonthNameProducesNoQuery() {
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: nil, period: .specificMonth(monthName: "Smarch"),
-            ranking: nil, budgetState: nil, wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, categories: [], today: today))
+        let interpretation = blankInterpretation(metric: .spending, period: .specificMonth(monthName: "Smarch"))
+        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "test", categories: [], today: today))
     }
 
     func testDateRangePeriodResolvesWithTheEndDateInclusive() {
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: nil,
-            period: .dateRange(startDate: "2025-06-05", endDate: "2025-06-18"), ranking: nil, budgetState: nil,
-            wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, categories: [], today: today) else {
+        let interpretation = blankInterpretation(metric: .spending, period: .dateRange(startDate: "2025-06-05", endDate: "2025-06-18"))
+        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "test", categories: [], today: today) else {
             return XCTFail("should build a query")
         }
         guard case .supported(let period) = query.periodMatch, case .dateRange(let start, let end) = period.kind else {
@@ -231,35 +252,21 @@ final class AskClaritySemanticQueryBuilderTests: XCTestCase {
     }
 
     func testDateRangeWithEndBeforeStartProducesNoQuery() {
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: nil,
-            period: .dateRange(startDate: "2025-06-18", endDate: "2025-06-05"), ranking: nil, budgetState: nil,
-            wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, categories: [], today: today))
+        let interpretation = blankInterpretation(metric: .spending, period: .dateRange(startDate: "2025-06-18", endDate: "2025-06-05"))
+        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "test", categories: [], today: today))
     }
 
     func testMalformedDateStringProducesNoQuery() {
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: nil,
-            period: .dateRange(startDate: "not-a-date", endDate: "2025-06-05"), ranking: nil, budgetState: nil,
-            wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, categories: [], today: today))
+        let interpretation = blankInterpretation(metric: .spending, period: .dateRange(startDate: "not-a-date", endDate: "2025-06-05"))
+        XCTAssertNil(AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "test", categories: [], today: today))
     }
 
     /// A built query behaves identically to a locally-interpreted one once handed to the
     /// existing `AskClarityPlanner` — a trend/breakdown/budget-state request from Claude is
     /// planned exactly like the same request typed in the deterministic vocabulary.
     func testBuiltQueryPlansExactlyLikeALocallyInterpretedOne() {
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: nil, categoryName: nil, period: .named(.thisMonth), ranking: nil,
-            budgetState: .overBudget, wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, categories: [], today: today) else {
+        let interpretation = blankInterpretation(period: .named(.thisMonth), budgetState: .overBudget)
+        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "am I over budget this month", categories: [], today: today) else {
             return XCTFail("should build a query")
         }
         guard case .plan(let plan) = AskClarityPlanner.plan(for: query, context: .empty, today: today) else {
@@ -268,9 +275,52 @@ final class AskClaritySemanticQueryBuilderTests: XCTestCase {
         XCTAssertEqual(plan.operation, .budgetState)
         XCTAssertEqual(plan.budgetState, .overBudget)
     }
+
+    // MARK: Ambiguity stabilization ("recently"/"lately"/"recent" always mean the same period)
+
+    func testRecentlyAlwaysMapsToTheFixedThisWeekPeriodEvenWhenTheModelClaimedSomethingElse() {
+        // The (simulated) model claims "thisMonth" — the fixed word rule must override it anyway.
+        let interpretation = blankInterpretation(metric: .spending, period: .named(.thisMonth))
+        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "Where did most of my money go recently?", categories: [], today: today) else {
+            return XCTFail("should build a query")
+        }
+        guard case .supported(let period) = query.periodMatch else { return XCTFail() }
+        XCTAssertEqual(period.kind, .thisWeek)
+    }
+
+    func testLatelyAndRecentAlsoMapToTheSameFixedThisWeekPeriod() {
+        for word in ["lately", "recent"] {
+            let interpretation = blankInterpretation(metric: .spending, period: nil)
+            guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "How much have I spent \(word)?", categories: [], today: today) else {
+                return XCTFail("should build a query for \"\(word)\"")
+            }
+            guard case .supported(let period) = query.periodMatch else { return XCTFail("no period resolved for \"\(word)\"") }
+            XCTAssertEqual(period.kind, .thisWeek, "\"\(word)\" should map to thisWeek")
+        }
+    }
+
+    func testQuestionsWithoutAFixedWordKeepWhateverPeriodTheModelReturned() {
+        let interpretation = blankInterpretation(metric: .spending, period: .named(.thisMonth))
+        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "How much did I spend this month?", categories: [], today: today) else {
+            return XCTFail("should build a query")
+        }
+        guard case .supported(let period) = query.periodMatch else { return XCTFail() }
+        XCTAssertEqual(period.kind, .thisMonth)
+    }
+
+    /// "recent" must match as a whole word only — a question that merely contains "recent" as a
+    /// substring of an unrelated word must not trigger the override.
+    func testFixedWordMatchingIsWholeWordNotSubstring() {
+        let interpretation = blankInterpretation(metric: .spending, period: .named(.thisMonth))
+        guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "How much did I spend on recreational activities this month?", categories: [], today: today) else {
+            return XCTFail("should build a query")
+        }
+        guard case .supported(let period) = query.periodMatch else { return XCTFail() }
+        XCTAssertEqual(period.kind, .thisMonth, "\"recreational\" contains \"recent\" as a substring but is a different word and must not trigger the override")
+    }
 }
 
-// MARK: - Request building (no financial data ever sent)
+// MARK: - Request building (no financial data ever sent; deterministic decoding)
 
 final class AskClaritySemanticRequestBuilderTests: XCTestCase {
     func testRequestBodyContainsNoFinancialAmounts() throws {
@@ -290,6 +340,31 @@ final class AskClaritySemanticRequestBuilderTests: XCTestCase {
         XCTAssertTrue(json.contains("claude-haiku-4-5-20251001"))
         XCTAssertFalse(json.contains("Entry"))
         XCTAssertFalse(json.contains("Decimal"))
+    }
+
+    /// Determinism requirement: decoding must be as close to deterministic as the API allows.
+    func testRequestBodyUsesZeroTemperatureForDeterministicDecoding() throws {
+        let context = AskClaritySemanticContext(question: "test", today: today, availableCategoryNames: [])
+        let data = try XCTUnwrap(AskClaritySemanticRequestBuilder.requestBody(context: context, model: "m", limits: .default))
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(json.contains("\"temperature\":0"), json)
+    }
+
+    /// The prompt itself must state the fixed word rules this phase adds — belt-and-suspenders
+    /// alongside the code-level override in `AskClaritySemanticAmbiguityRules`.
+    func testInstructionsDefineAFixedMappingForRecentlyLatelyAndRecent() {
+        let instructions = AskClaritySemanticRequestBuilder.instructions
+        XCTAssertTrue(instructions.contains("\"recently\""))
+        XCTAssertTrue(instructions.contains("\"lately\""))
+        XCTAssertTrue(instructions.contains("\"recent\""))
+        XCTAssertTrue(instructions.contains("thisWeek"))
+    }
+
+    func testInstructionsDefineTheThreeWayResultVocabularyIncludingNeedsClarification() {
+        let instructions = AskClaritySemanticRequestBuilder.instructions
+        XCTAssertTrue(instructions.contains("needsClarification"))
+        XCTAssertTrue(instructions.contains("unsupported"))
+        XCTAssertTrue(instructions.contains("understood"))
     }
 
     func testQuestionLongerThanTheLimitIsTruncated() throws {
@@ -376,16 +451,12 @@ final class AskClarityEngineSemanticFallbackTests: XCTestCase {
         let entry = TestSupport.makeEntry(amount: 65, date: testDate(2025, 6, 10), type: .expense, category: restaurants, wallet: wallet)
         context.insert(wallet); context.insert(head); context.insert(restaurants); context.insert(entry)
 
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth), ranking: nil,
-            budgetState: nil, wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        let stub = StubSemanticProvider(result: interpretation)
+        let interpretation = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let stub = StubSemanticProvider(result: .understood(interpretation))
 
         // A phrasing the deterministic keyword interpreter has no vocabulary for at all.
         let result = await AskClarityEngine.respondWithSemanticFallback(
-            to: "I've been treating myself to eating out lately, curious what that's run me", context: .empty,
+            to: "I've been treating myself to eating out, curious what that's run me", context: .empty,
             entries: [entry], budgets: [], headCategories: [head], settings: testSettings(), today: today, semanticProvider: stub
         )
 
@@ -400,11 +471,7 @@ final class AskClarityEngineSemanticFallbackTests: XCTestCase {
     /// answer is computed locally from real data every time, never supplied by the semantic layer
     /// (whose interpretation schema has no amount/total field at all to supply one from).
     func testTheFinalAmountAlwaysComesFromRealLocalDataNeverFromTheSemanticLayer() async {
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth), ranking: nil,
-            budgetState: nil, wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
+        let interpretation = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
 
         func runWithAmount(_ amount: Decimal) async -> String {
             let context = TestSupport.makeInMemoryContext()
@@ -413,7 +480,7 @@ final class AskClarityEngineSemanticFallbackTests: XCTestCase {
             let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
             let entry = TestSupport.makeEntry(amount: amount, date: testDate(2025, 6, 10), type: .expense, category: restaurants, wallet: wallet)
             context.insert(wallet); context.insert(head); context.insert(restaurants); context.insert(entry)
-            let stub = StubSemanticProvider(result: interpretation)
+            let stub = StubSemanticProvider(result: .understood(interpretation))
             let result = await AskClarityEngine.respondWithSemanticFallback(
                 to: "eating out spend", context: .empty, entries: [entry], budgets: [], headCategories: [head],
                 settings: testSettings(), today: today, semanticProvider: stub
@@ -439,6 +506,22 @@ final class AskClarityEngineSemanticFallbackTests: XCTestCase {
         XCTAssertFalse(result.answer.headline.contains("France"), "must never answer a general-knowledge question: \(result.answer.headline)")
     }
 
+    /// The new three-way outcome this phase adds: `.needsClarification` must produce a distinct
+    /// answer from plain `.unsupported` — the point is that the user gets asked to be more
+    /// specific, not told the question is out of scope entirely — and the message must be a fixed,
+    /// locally-authored string, never text composed by Claude (no LLM response generation yet).
+    func testNeedsClarificationProducesADistinctLocallyAuthoredClarificationAnswer() async {
+        let stub = StubSemanticProvider(result: .needsClarification)
+        let result = await AskClarityEngine.respondWithSemanticFallback(
+            to: "how's my money situation these days", context: .empty, entries: [], budgets: [], headCategories: [],
+            settings: testSettings(), today: today, semanticProvider: stub
+        )
+        XCTAssertEqual(stub.callCount, 1)
+        XCTAssertFalse(result.answer.hasSufficientData)
+        XCTAssertNotEqual(result.answer.headline, "I couldn't find a supported way to answer that yet.", "must read differently from the plain unsupported/unrecognized answer")
+        XCTAssertFalse(result.answer.headline.isEmpty)
+    }
+
     /// Simulates every real-world failure mode a provider can hit (missing API key, offline,
     /// non-2xx response, malformed reply) — `AskClaritySemanticProviding.interpret` returns `nil`
     /// in all of them, and the app must keep working with the local answer regardless.
@@ -456,12 +539,8 @@ final class AskClarityEngineSemanticFallbackTests: XCTestCase {
     /// A hallucinated category name (not in the list the provider was given) must degrade to the
     /// same local "couldn't understand" answer, never a guess.
     func testInterpretationThatCannotBuildAQueryFallsBackToTheLocalUnknownAnswer() async {
-        let interpretation = AskClaritySemanticInterpretation(
-            supported: true, metric: .spending, categoryName: "Made Up Category", period: nil, ranking: nil,
-            budgetState: nil, wantsBreakdown: false, wantsTrend: false, trendSpan: nil, wantsList: false,
-            wantsTransactionRanking: false, wantsAssessment: false, comparisonRequested: false
-        )
-        let stub = StubSemanticProvider(result: interpretation)
+        let interpretation = blankInterpretation(metric: .spending, categoryName: "Made Up Category")
+        let stub = StubSemanticProvider(result: .understood(interpretation))
         let result = await AskClarityEngine.respondWithSemanticFallback(
             to: "what about that", context: .empty, entries: [], budgets: [], headCategories: [],
             settings: testSettings(), today: today, semanticProvider: stub
@@ -522,5 +601,183 @@ final class AskClarityEngineSemanticFallbackTests: XCTestCase {
         // `AskClaritySemanticContext` has no field capable of carrying `secretEntry`'s 123,456
         // amount at all — this is enforced by its type, not by this assertion, but the point
         // stands: nothing observable here ever mentions that figure.
+    }
+}
+
+// MARK: - Determinism ("same question -> same query," run repeatedly)
+
+final class AskClaritySemanticDeterminismTests: XCTestCase {
+    /// Pure-function determinism: the parser is ordinary code, not sampling — this guards against
+    /// an accidental source of instability creeping in (e.g. `Set`/`Dictionary` iteration order,
+    /// a stray `Date.now`/UUID) by proving the exact same raw reply really does parse to the exact
+    /// same outcome, every time, many times in a row.
+    func testParsingTheSameRawReplyRepeatedlyAlwaysProducesTheSameOutcome() {
+        let json = """
+        {"result":"understood","metric":"spending","categoryName":"Restaurants",\
+        "period":{"kind":"named","value":"thisMonth"},"ranking":null,"budgetState":null,\
+        "wantsBreakdown":false,"wantsTrend":false,"trendSpan":null,"wantsList":false,\
+        "wantsTransactionRanking":false,"wantsAssessment":false,"comparisonRequested":true}
+        """
+        let results = (0..<25).map { _ in AskClaritySemanticResponseParser.parse(json) }
+        XCTAssertTrue(results.allSatisfy { $0 == results[0] }, "identical raw text must always parse to the identical outcome")
+    }
+
+    func testBuildingAQueryFromTheSameInterpretationRepeatedlyAlwaysProducesAnEquivalentQuery() {
+        let context = TestSupport.makeInMemoryContext()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
+        context.insert(head); context.insert(restaurants)
+
+        let interpretation = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let queries = (0..<25).compactMap { _ in
+            AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "How much on restaurants this month?", categories: [restaurants], today: today)
+        }
+        XCTAssertEqual(queries.count, 25)
+        XCTAssertTrue(queries.allSatisfy { $0.metric == queries[0].metric && $0.periodMatch == queries[0].periodMatch })
+        XCTAssertTrue(queries.allSatisfy {
+            guard case .resolved(let category) = $0.categoryMatch else { return false }
+            return category === restaurants
+        })
+    }
+
+    /// The end-to-end pipeline a real user session drives: same stubbed provider output, same
+    /// local data, called many times in a row — every resulting answer must be identical
+    /// (headline, supportingDetail, hasSufficientData), never varying run to run.
+    func testTheFullFallbackPipelineProducesAnIdenticalAnswerAcrossManyRepeatedCalls() async {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
+        let entry = TestSupport.makeEntry(amount: 65, date: testDate(2025, 6, 10), type: .expense, category: restaurants, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(restaurants); context.insert(entry)
+
+        let interpretation = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let question = "I've been treating myself to eating out, curious what that's run me"
+
+        var headlines: [String] = []
+        for _ in 0..<10 {
+            let stub = StubSemanticProvider(result: .understood(interpretation))
+            let result = await AskClarityEngine.respondWithSemanticFallback(
+                to: question, context: .empty, entries: [entry], budgets: [], headCategories: [head],
+                settings: testSettings(), today: today, semanticProvider: stub
+            )
+            headlines.append(result.answer.headline)
+        }
+        XCTAssertEqual(Set(headlines).count, 1, "the exact same question and stubbed interpretation must never produce two different answers: \(headlines)")
+    }
+
+    /// "recently"/"lately"/"recent" specifically — the requirement this phase adds: these words
+    /// must resolve to the same period no matter what a (simulated) noisy/inconsistent model
+    /// claims from call to call, proving the override in `AskClaritySemanticAmbiguityRules` — not
+    /// the model's own consistency — is what actually guarantees this.
+    func testRecentlyResolvesToTheSamePeriodEvenWhenTheSimulatedModelDisagreesWithItselfBetweenCalls() {
+        let noisyPeriods: [AskClaritySemanticPeriod?] = [.named(.thisMonth), .named(.thisWeekend), nil, .named(.lastWeek), .named(.thisWeek)]
+        let resolvedPeriods: [AskClarityPeriodKind?] = noisyPeriods.map { period in
+            let interpretation = blankInterpretation(metric: .spending, period: period, ranking: .highest, wantsBreakdown: true, wantsList: true)
+            let query = AskClaritySemanticQueryBuilder.buildQuery(from: interpretation, question: "Where did most of my money go recently?", categories: [], today: today)
+            guard case .supported(let resolved) = query?.periodMatch else { return nil }
+            return resolved.kind
+        }
+        XCTAssertEqual(resolvedPeriods, Array(repeating: AskClarityPeriodKind.thisWeek, count: noisyPeriods.count), "every simulated call must resolve to the same fixed period regardless of what period the model itself claimed")
+    }
+}
+
+// MARK: - UI conversation flow (the exact sequence `AskClarityView` drives)
+//
+// `AskClarityView` has no view model — `respondWithSemanticFallback` is called directly from its
+// (private) `performAsk`, threading `context`/`callBudget` across turns exactly as simulated below.
+// These tests exercise that same multi-turn sequence with a stub provider, since there's no
+// ViewInspector/snapshot harness in this target to drive the SwiftUI view itself.
+final class AskClarityViewConversationFlowTests: XCTestCase {
+    /// Mirrors a user asking a locally-understood question, then a follow-up only the semantic
+    /// layer can parse, in the same conversation — the kind of sequence a real `AskClarityView`
+    /// session produces one `ask(_:)` call at a time.
+    func testASessionCanMixLocallyUnderstoodAndSemanticallyFallenBackQuestionsWhileSharingOneCallBudget() async {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
+        let entry = TestSupport.makeEntry(amount: 65, date: testDate(2025, 6, 10), type: .expense, category: restaurants, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(restaurants); context.insert(entry)
+
+        let interpretation = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let stub = StubSemanticProvider(result: .understood(interpretation))
+        // One shared `AskClaritySemanticCallBudget`, exactly like the single `@State` instance
+        // `AskClarityView` holds for the life of a conversation.
+        let sessionBudget = AskClaritySemanticCallBudget()
+        var sessionContext = AskClaritySessionContext.empty
+
+        // Turn 1 — a question the deterministic interpreter already understands (a budget-state
+        // question with no budgeted categories at all, deliberately: unlike a plain metric
+        // question, this leaves `context` unchanged, so turn 2 below is tested with genuinely no
+        // inherited signal to lean on — see `AskClarityInterpreter`'s "minimal follow-up" context
+        // inheritance, which would otherwise silently answer turn 2 locally too).
+        let turn1 = await AskClarityEngine.respondWithSemanticFallback(
+            to: "Am I within my budget?", context: sessionContext, entries: [entry], budgets: [],
+            headCategories: [head], settings: testSettings(), today: today, semanticProvider: stub, callBudget: sessionBudget
+        )
+        sessionContext = turn1.updatedContext
+        XCTAssertEqual(stub.callCount, 0, "turn 1 is locally understood — must not touch the semantic layer")
+
+        // Turn 2 — a phrasing with no local signal, in the same session.
+        let turn2 = await AskClarityEngine.respondWithSemanticFallback(
+            to: "I've been treating myself to eating out, curious what that's run me", context: sessionContext,
+            entries: [entry], budgets: [], headCategories: [head], settings: testSettings(), today: today,
+            semanticProvider: stub, callBudget: sessionBudget
+        )
+        sessionContext = turn2.updatedContext
+        XCTAssertEqual(stub.callCount, 1)
+        XCTAssertTrue(turn2.answer.hasSufficientData)
+        XCTAssertTrue(turn2.answer.headline.contains("65"), turn2.answer.headline)
+        XCTAssertEqual(sessionBudget.callsMade, 1, "the same budget instance must carry its count across turns, exactly like the view's own @State")
+    }
+
+    /// Simulates the "New conversation" toolbar action, which — per `AskClarityView` — resets both
+    /// `context` and `callBudget` to fresh instances. A budget exhausted in the prior conversation
+    /// must not carry over into the new one.
+    func testStartingANewConversationResetsTheCallBudgetJustLikeTheNewConversationButtonDoes() async {
+        let stub = StubSemanticProvider(result: .unsupported)
+        var callBudget = AskClaritySemanticCallBudget(maxCalls: 1)
+
+        _ = await AskClarityEngine.respondWithSemanticFallback(
+            to: "gibberish one", context: .empty, entries: [], budgets: [], headCategories: [],
+            settings: testSettings(), today: today, semanticProvider: stub, callBudget: callBudget
+        )
+        XCTAssertEqual(stub.callCount, 1)
+        XCTAssertFalse(callBudget.hasRemainingCalls, "budget should be exhausted after one call with maxCalls: 1")
+
+        // "New conversation" — a fresh `AskClaritySemanticCallBudget()`, the same as the toolbar
+        // button assigning a new instance to `@State private var callBudget`.
+        callBudget = AskClaritySemanticCallBudget(maxCalls: 1)
+
+        _ = await AskClarityEngine.respondWithSemanticFallback(
+            to: "gibberish two", context: .empty, entries: [], budgets: [], headCategories: [],
+            settings: testSettings(), today: today, semanticProvider: stub, callBudget: callBudget
+        )
+        XCTAssertEqual(stub.callCount, 2, "a fresh conversation's budget must allow a call again, unaffected by the previous conversation's exhausted one")
+    }
+
+    /// `AskClarityView.performAsk` guards against overlap with `guard !isAsking else { return }` —
+    /// a concurrent call while one is already in flight must not reach the provider a second time.
+    /// This reproduces that guard directly against the engine call it wraps.
+    func testConcurrentAsksForTheSameConversationDoNotEachConsumeTheCallBudgetUnboundedly() async {
+        let stub = StubSemanticProvider(result: .unsupported)
+        let callBudget = AskClaritySemanticCallBudget(maxCalls: 5)
+
+        async let first = AskClarityEngine.respondWithSemanticFallback(
+            to: "gibberish A", context: .empty, entries: [], budgets: [], headCategories: [],
+            settings: testSettings(), today: today, semanticProvider: stub, callBudget: callBudget
+        )
+        async let second = AskClarityEngine.respondWithSemanticFallback(
+            to: "gibberish B", context: .empty, entries: [], budgets: [], headCategories: [],
+            settings: testSettings(), today: today, semanticProvider: stub, callBudget: callBudget
+        )
+        _ = await (first, second)
+
+        // Both questions are distinct and each locally unrecognized, so the engine itself calls the
+        // provider for each (the overlap guard lives in the view, not the engine) — but the shared
+        // budget must still account for exactly as many calls as were actually made, never more.
+        XCTAssertEqual(stub.callCount, 2)
+        XCTAssertEqual(callBudget.callsMade, 2)
     }
 }
