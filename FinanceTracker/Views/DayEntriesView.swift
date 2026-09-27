@@ -1,9 +1,15 @@
 import SwiftUI
 import SwiftData
 
-/// Sheet listing a single day's Entries, with that day's total spend at the top.
+/// Sheet listing a single day's Entries, with that day's total spend at the top. `day` is
+/// mutable (backed by `@State`) so the header's arrow buttons can step to the previous/next day
+/// in place, without dismissing and reopening this sheet from a different calendar cell — see
+/// `stepDay(by:)`/`refreshEntries()`, which re-fetch directly from `modelContext` rather than
+/// relying on whatever month-scoped entry list the presenting `CalendarView` happened to build,
+/// so stepping across a month boundary (e.g. Sep 30 -> Oct 1) works correctly with no other
+/// changes needed.
 struct DayEntriesView: View {
-    let day: Date
+    @State private var day: Date
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -12,7 +18,7 @@ struct DayEntriesView: View {
     @State private var showingAddTransaction = false
 
     init(day: Date, entries: [Entry]) {
-        self.day = day
+        _day = State(initialValue: day)
         _entries = State(initialValue: entries)
     }
 
@@ -80,11 +86,13 @@ struct DayEntriesView: View {
                 }
             }
             .background(Color.appBackground.ignoresSafeArea())
-            .navigationTitle(dayTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .principal) {
+                    dayStepper
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -110,6 +118,35 @@ struct DayEntriesView: View {
         if Calendar.current.isDateInToday(day) { return "Today" }
         if Calendar.current.isDateInYesterday(day) { return "Yesterday" }
         return day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+    }
+
+    /// The date label plus a previous/next-day arrow on either side, replacing the plain
+    /// `navigationTitle` this sheet used to have — lets the user step through days in place
+    /// (forward into the future too, matching how `AddTransactionView` already allows logging a
+    /// future-dated entry) without closing this sheet and tapping a different calendar cell.
+    private var dayStepper: some View {
+        HStack(spacing: 20) {
+            Button {
+                stepDay(by: -1)
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            Text(dayTitle)
+                .font(.headline)
+                .fixedSize()
+            Button {
+                stepDay(by: 1)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+        }
+        .foregroundStyle(.textPrimary)
+    }
+
+    private func stepDay(by dayCount: Int) {
+        guard let newDay = Calendar.current.date(byAdding: .day, value: dayCount, to: day) else { return }
+        day = newDay
+        refreshEntries()
     }
 
     private func delete(_ entry: Entry) {

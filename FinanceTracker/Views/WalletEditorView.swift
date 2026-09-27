@@ -302,6 +302,32 @@ struct WalletEditorView: View {
         }
     }
 
+    /// What editing an existing wallet's balance field should actually do — exposed as a pure,
+    /// testable function since `save()` itself needs live `Wallet`/`ModelContext` state.
+    enum BalanceEditOutcome: Equatable {
+        /// A wallet with no real transaction history yet (`hasRealHistory == false`) has nothing
+        /// to "correct" — its balance so far is entirely `startingBalance`, exactly like a
+        /// brand-new wallet's (see `save()`'s `else` branch), so editing it behaves identically:
+        /// assign `startingBalance` directly, no `Entry`. Without this case, even a wallet's very
+        /// first balance entry (typed moments after creating it) would be logged as a phantom
+        /// "Balance adjustment" transaction against a wallet that never had one.
+        case setStartingBalanceDirectly(Decimal)
+        /// Once a wallet has a real `Entry` or incoming transfer against it, `wallet.balance`
+        /// reflects actual activity, and a further manual edit is a genuine correction — logged
+        /// as a real, auditable `Entry` rather than silently reverse-deriving `startingBalance`
+        /// to match, so a manual balance correction shows up in the wallet's transaction history
+        /// like anything else that moves its balance, instead of disappearing invisibly.
+        case logAdjustmentEntry(amount: Decimal, type: EntryType)
+        case noChange
+    }
+
+    static func resolveBalanceEdit(desiredBalance: Decimal, currentBalance: Decimal, hasRealHistory: Bool) -> BalanceEditOutcome {
+        guard hasRealHistory else { return .setStartingBalanceDirectly(desiredBalance) }
+        let delta = desiredBalance - currentBalance
+        guard delta != 0 else { return .noChange }
+        return .logAdjustmentEntry(amount: abs(delta), type: delta > 0 ? .income : .expense)
+    }
+
     private func save() {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else { return }
@@ -309,20 +335,17 @@ struct WalletEditorView: View {
         let desiredBalance = Decimal(decimalInput: currentBalanceText) ?? 0
 
         if let wallet {
-            // Log the difference as a real entry rather than silently reverse-deriving
-            // startingBalance to match — a manual balance correction should show up in the
-            // wallet's transaction history like anything else that moves its balance, not
-            // disappear into an invisible starting-balance adjustment.
-            let delta = desiredBalance - wallet.balance
-            if delta != 0 {
-                let adjustment = Entry(
-                    amount: abs(delta),
-                    note: "Balance adjustment",
-                    type: delta > 0 ? .income : .expense,
-                    wallet: wallet,
-                    excludeFromBudget: true
-                )
+            // Same predicate `Wallet.canBeDeleted` already uses — a wallet with no real entries
+            // or incoming transfers has nothing to "correct" (see `resolveBalanceEdit`) and, not
+            // coincidentally, is also the exact case "Remove Account" allows.
+            switch Self.resolveBalanceEdit(desiredBalance: desiredBalance, currentBalance: wallet.balance, hasRealHistory: !wallet.canBeDeleted) {
+            case .setStartingBalanceDirectly(let balance):
+                wallet.startingBalance = balance
+            case .logAdjustmentEntry(let amount, let type):
+                let adjustment = Entry(amount: amount, note: "Balance adjustment", type: type, wallet: wallet, excludeFromBudget: true)
                 modelContext.insert(adjustment)
+            case .noChange:
+                break
             }
             wallet.name = trimmedName
             wallet.type = type
