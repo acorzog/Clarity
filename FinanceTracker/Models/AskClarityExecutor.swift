@@ -21,10 +21,18 @@ enum AskClarityExecutionResult {
     /// budget"); `health` is the global ranked list ("which categories are over budget") — never
     /// both, matching `AskClarityPlan.subjects.first?.singleCategory`'s presence.
     case budgetState(categoryRow: CategoryActual?, health: [CategorySpendingHealth])
+    /// The categoryless, `.overall`-scoped budget-state question ("Am I within my budget?") —
+    /// total spending vs. total applicable budget for the period, via the exact same
+    /// `BudgetCalculator.periodSpendingSummary` Home's Safe-to-Spend/`RemainingView` already use.
+    /// See `AskClarityPlan.budgetScope`.
+    case overallBudgetState(summary: PeriodSpendingSummary)
     /// One point per consecutive equivalent period the trend chain could resolve, oldest first —
     /// shorter than the plan's requested `trendSpan` whenever the period kind can't chain back
     /// that far (see `AskClarityPeriodKind.previousEquivalent`).
     case trend(points: [(period: AskClarityPeriod, amount: Decimal)])
+    /// One row per calendar day with eligible spending in the period, highest-first — the day-level
+    /// analog of `categoryRanking`, optionally scoped to `AskClarityPlan.subjects.first?.categories`.
+    case dayRanking(rows: [(day: Date, amount: Decimal)])
     case unresolvable
 }
 
@@ -57,6 +65,8 @@ enum AskClarityExecutor {
             return executeCategoryBreakdown(plan: plan, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, calendar: calendar, today: today)
         case .trend:
             return executeTrend(plan: plan, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, calendar: calendar, today: today)
+        case .rankDays:
+            return executeDayRanking(plan: plan, entries: entries, calendar: calendar, today: today)
         }
     }
 
@@ -185,6 +195,18 @@ enum AskClarityExecutor {
         return .transactionRanking(entries: [top])
     }
 
+    // MARK: - Day ranking
+
+    /// Uses `AskClarityEngine.calendarBounds` (a plain calendar interval, including for month-based
+    /// periods) rather than the budget-cycle-aware month calculators — a day-by-day breakdown has
+    /// no budget-cycle concept to respect, matching `executeTransactionRanking`'s own convention.
+    private static func executeDayRanking(plan: AskClarityPlan, entries: [Entry], calendar: Calendar, today: Date) -> AskClarityExecutionResult {
+        guard let (start, end) = AskClarityEngine.calendarBounds(for: plan.period.kind, today: today, calendar: calendar) else { return .unresolvable }
+        let categories = plan.subjects.first?.categories
+        let rows = AskClarityRangeCalculator.dailyTotals(from: start, to: end, entries: entries, categories: categories, calendar: calendar)
+        return .dayRanking(rows: rows)
+    }
+
     // MARK: - Budget state
 
     private static func executeBudgetState(
@@ -197,6 +219,10 @@ enum AskClarityExecutor {
             let summary = BudgetCalculator.periodSpendingSummary(month: month, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, respectHiddenCategories: true, calendar: calendar)
             let row = summary.byCategory.first { $0.category === category }
             return .budgetState(categoryRow: row, health: [])
+        }
+        if plan.budgetScope == .overall {
+            let summary = BudgetCalculator.periodSpendingSummary(month: month, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, respectHiddenCategories: true, calendar: calendar)
+            return .overallBudgetState(summary: summary)
         }
         let health = OverviewCalculator.categorySpendingHealth(month: month, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, calendar: calendar)
         return .budgetState(categoryRow: nil, health: health)

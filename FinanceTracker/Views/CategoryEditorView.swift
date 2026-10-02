@@ -34,6 +34,7 @@ struct CategoryEditorView: View {
     @State private var emojiSearchText = ""
     @State private var selectedColorHex: String?
     @State private var isSavings = false
+    @State private var isFixedPlannedCategory = false
     @State private var hasLoaded = false
     @State private var isPickingHeadCategory = false
 
@@ -285,6 +286,15 @@ struct CategoryEditorView: View {
                     .foregroundStyle(.white.opacity(0.4))
             }
             .listRowBackground(Color.white.opacity(0.05))
+
+            Section {
+                Toggle("Fixed Planned Category", isOn: $isFixedPlannedCategory)
+                    .tint(.emerald)
+            } footer: {
+                Text("For a category whose monthly budget is normally one single known charge — rent, a fixed accountant fee — rather than many smaller purchases. A new expense in this category that exactly matches its planned budget is automatically marked as a Planned Expense, so it won't be flagged as overspending in your Clarity Score.")
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+            .listRowBackground(Color.white.opacity(0.05))
         }
         .scrollContentBackground(.hidden)
         .background(Color.appBackground.ignoresSafeArea())
@@ -369,6 +379,7 @@ struct CategoryEditorView: View {
             }
             selectedColorHex = category.customColorHex
             isSavings = category.isSavings
+            isFixedPlannedCategory = category.isFixedPlannedCategory
         } else {
             selectedHeadCategory = defaultHeadCategory ?? headCategories.first
         }
@@ -395,6 +406,7 @@ struct CategoryEditorView: View {
             category.iconIsEmoji = usesEmoji
             category.customColorHex = selectedColorHex
             category.isSavings = isSavings
+            category.isFixedPlannedCategory = isFixedPlannedCategory
             onSave?(category)
         } else {
             let newCategory = Category(
@@ -404,6 +416,7 @@ struct CategoryEditorView: View {
                 customColorHex: selectedColorHex,
                 isSavings: isSavings,
                 isIncome: defaultIsIncome,
+                isFixedPlannedCategory: isFixedPlannedCategory,
                 headCategory: head
             )
             modelContext.insert(newCategory)

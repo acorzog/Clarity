@@ -35,6 +35,38 @@ final class IntentWalletResolutionTests: XCTestCase {
         XCTAssertNil(LogExpenseIntent.resolveWallet(named: nil, from: [archived]))
     }
 
+    // MARK: - LogExpenseIntent.resolveEffectiveNote
+
+    func testResolveEffectiveNoteReturnsEmptyWhenBothNilMatchingPreMerchantBehavior() {
+        XCTAssertEqual(LogExpenseIntent.resolveEffectiveNote(note: nil, merchant: nil), "")
+    }
+
+    func testResolveEffectiveNoteFallsBackToNoteWhenMerchantNilPreservingExistingShortcuts() {
+        // Existing Shortcuts that only ever wired `note` (never `merchant`) must keep working
+        // exactly as before.
+        XCTAssertEqual(LogExpenseIntent.resolveEffectiveNote(note: "Coffee run", merchant: nil), "Coffee run")
+    }
+
+    func testResolveEffectiveNoteFallsBackToNoteWhenMerchantBlank() {
+        XCTAssertEqual(LogExpenseIntent.resolveEffectiveNote(note: "Coffee run", merchant: "   "), "Coffee run")
+    }
+
+    func testResolveEffectiveNoteUsesMerchantWhenNoteNil() {
+        XCTAssertEqual(LogExpenseIntent.resolveEffectiveNote(note: nil, merchant: "Mercadona"), "Mercadona")
+    }
+
+    func testResolveEffectiveNotePrefersMerchantWhenBothPresent() {
+        XCTAssertEqual(LogExpenseIntent.resolveEffectiveNote(note: "Groceries", merchant: "Mercadona"), "Mercadona")
+    }
+
+    func testResolveEffectiveNoteTrimsWhitespace() {
+        XCTAssertEqual(LogExpenseIntent.resolveEffectiveNote(note: nil, merchant: "  Mercadona  "), "Mercadona")
+    }
+
+    func testResolveEffectiveNoteReturnsEmptyWhenBothBlank() {
+        XCTAssertEqual(LogExpenseIntent.resolveEffectiveNote(note: "   ", merchant: "   "), "")
+    }
+
     // MARK: - TransactionFromTextIntent
 
     func testTransactionFromTextIntentExcludesArchivedWallets() {

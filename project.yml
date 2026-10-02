@@ -34,6 +34,8 @@ targets:
         # silently dropped it on regeneration — restored here as the actual source of truth so
         # that can't happen again.
         CKSharingSupported: true
+        NSMicrophoneUsageDescription: "Clarity uses your microphone to turn a spoken expense into a transaction."
+        NSSpeechRecognitionUsageDescription: "Clarity uses speech recognition to understand the amount and merchant of a spoken expense."
         # Full UILaunchScreen dict (rather than *_Generation: YES) so the system-level launch
         # screen is a solid dark background matching the app instead of default white — this is
         # what's visible for the instant before LaunchScreenView (SwiftUI) takes over.
@@ -88,6 +90,8 @@ targets:
             CFBundleURLSchemes:
               - financetrackerdev
         CKSharingSupported: true
+        NSMicrophoneUsageDescription: "Clarity uses your microphone to turn a spoken expense into a transaction."
+        NSSpeechRecognitionUsageDescription: "Clarity uses speech recognition to understand the amount and merchant of a spoken expense."
         UILaunchScreen:
           UIColorName: LaunchBackground
     settings:

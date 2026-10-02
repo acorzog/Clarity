@@ -17,7 +17,7 @@ struct WidgetsInfoView: View {
 
                     HStack(spacing: 16) {
                         BudgetGaugeWidgetPreview()
-                        QuickLogWidgetPreview()
+                        VoiceExpenseWidgetPreview()
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -30,7 +30,7 @@ struct WidgetsInfoView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         HowToStep(number: 1, text: "Touch and hold an empty area on your Home Screen until the apps jiggle.")
                         HowToStep(number: 2, text: "Tap the + button in the top corner.")
-                        HowToStep(number: 3, text: "Search for Clarity, choose a widget, and tap Add Widget.")
+                        HowToStep(number: 3, text: "Search for Clarity, choose Voice Expense, and tap Add Widget. Tap it to open the voice recorder in Clarity.")
                     }
                 }
                 .padding(20)
@@ -90,16 +90,16 @@ private struct BudgetGaugeWidgetPreview: View {
     }
 }
 
-private struct QuickLogWidgetPreview: View {
+private struct VoiceExpenseWidgetPreview: View {
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "plus.circle.fill")
+            Image(systemName: "mic.circle.fill")
                 .font(.system(size: 34))
                 .foregroundStyle(LinearGradient.emeraldSky)
-            Text("Add Expense")
+            Text("Voice Expense")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white)
-            Text("Quick Log")
+            Text("Open to record")
                 .font(.system(size: 10))
                 .foregroundStyle(.white.opacity(0.5))
         }

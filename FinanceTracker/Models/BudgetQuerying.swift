@@ -55,4 +55,18 @@ extension Array where Element == Budget {
         }
         return mostRecentBudget(for: category, before: month)?.isFixed ?? false
     }
+
+    /// Whether a new expense of `amount` should be auto-marked `isPlannedExpense` on save: `nil`
+    /// category never matches, and a category not flagged `isFixedPlannedCategory` (groceries,
+    /// eating out — a month's budget made up of many smaller purchases) never matches either,
+    /// however close any single one of them lands to the planned total. Only a category whose
+    /// whole month is normally one single known charge (rent, a fixed accountant fee) — and only
+    /// when this entry's amount is an *exact* match for that month's planned `amount(for:month:)`
+    /// — counts; anything else (under, over, a different category) is left for the person to mark
+    /// by hand, same as today.
+    func matchesFixedPlannedAmount(_ amount: Decimal, for category: Category?, month: Date) -> Bool {
+        guard let category, category.isFixedPlannedCategory else { return false }
+        let planned = self.amount(for: category, month: month)
+        return planned > 0 && amount == planned
+    }
 }

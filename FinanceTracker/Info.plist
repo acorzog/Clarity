@@ -31,6 +31,10 @@
 	<string>1</string>
 	<key>CKSharingSupported</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Clarity uses your microphone to turn a spoken expense into a transaction.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Clarity uses speech recognition to understand the amount and merchant of a spoken expense.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

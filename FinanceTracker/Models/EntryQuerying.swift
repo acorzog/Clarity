@@ -13,9 +13,16 @@ extension Array where Element == Entry {
 
     /// Entries falling within the budget cycle (anchored on `month`) that starts on `startDay`
     /// of each month. `startDay` of 1 behaves exactly like `inMonth`.
+    ///
+    /// Deliberately half-open (`date < period.end`), not `DateInterval.contains` (which treats
+    /// both ends as inclusive): a date-only entry logged for the 1st of a month normalizes to
+    /// that day's midnight, which is simultaneously the *previous* period's `end` and the new
+    /// period's `start` — with `.contains`, that one entry satisfied both periods' intervals and
+    /// got counted in each one's totals (e.g. an Oct 1 entry inflating September's Remaining).
+    /// `period.end` is the instant the *next* period starts, so it must belong only to that one.
     func inBudgetPeriod(_ month: Date, startDay: Int, calendar: Calendar = .current) -> [Entry] {
         let period = month.budgetPeriod(startDay: startDay, calendar: calendar)
-        return filter { period.contains($0.date) }
+        return filter { $0.date >= period.start && $0.date < period.end }
     }
 
     var totalIncome: Decimal {

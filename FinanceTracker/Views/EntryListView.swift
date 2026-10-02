@@ -13,6 +13,12 @@ struct EntryListView: View {
     private var monthEntries: [Entry] { allEntries.inMonth(month) }
     private var income: Decimal { monthEntries.totalIncome }
     private var expenses: Decimal { monthEntries.totalExpenses }
+    /// Deliberately unfiltered by `.budgetEligible` — this card totals every entry in the month,
+    /// same as the list below it and `Wallet.balance` (see `BudgetEligibility.swift`'s doc
+    /// comment), unlike Overview's budget-eligible Income/Expenses/Net. Surfaced in the UI via
+    /// `MonthSummaryCard`'s footnote so the two screens' differing totals for the same month read
+    /// as two distinct, intentional metrics rather than a discrepancy.
+    private var hasExcludedEntries: Bool { monthEntries.contains { $0.excludeFromBudget } }
 
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
@@ -48,7 +54,7 @@ struct EntryListView: View {
             List {
                 if settings.showListSummary {
                     Section {
-                        MonthSummaryCard(income: income, expenses: expenses)
+                        MonthSummaryCard(income: income, expenses: expenses, includesExcludedEntries: hasExcludedEntries)
                     }
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
@@ -133,17 +139,28 @@ private struct DaySectionHeader: View {
 private struct MonthSummaryCard: View {
     let income: Decimal
     let expenses: Decimal
+    /// Whether this month includes any entry excluded from budget totals (e.g. a wallet balance
+    /// adjustment) — shown as a footnote since this card's totals, unlike Overview's, count those
+    /// entries in (see `EntryListView.hasExcludedEntries`).
+    let includesExcludedEntries: Bool
 
     private var balance: Decimal { income - expenses }
     private var balanceColor: Color { balance >= 0 ? .skyBlue : .expenseRed }
 
     var body: some View {
-        HStack {
-            column(title: "Income", amount: income, color: .emerald)
-            Spacer()
-            column(title: "Expenses", amount: expenses, color: .expenseRed)
-            Spacer()
-            column(title: "Balance", amount: balance, color: balanceColor)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                column(title: "Income", amount: income, color: .emerald)
+                Spacer()
+                column(title: "Expenses", amount: expenses, color: .expenseRed)
+                Spacer()
+                column(title: "Balance", amount: balance, color: balanceColor)
+            }
+            if includesExcludedEntries {
+                Text("Includes entries excluded from budget totals — may differ from Overview.")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.4))
+            }
         }
         .padding(20)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 24))

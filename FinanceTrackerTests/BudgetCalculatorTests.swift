@@ -471,6 +471,42 @@ final class BudgetCalculatorPeriodSpendingSummaryTests: XCTestCase {
         XCTAssertEqual(summary.period.end, testDate(2025, 7, 15))
     }
 
+    /// An entry dated exactly the 1st of a month (midnight, as any date-only picker normalizes
+    /// to) sits precisely on the boundary between the calendar-month cycle ending there and the
+    /// next one starting there. `DateInterval.contains` treats both ends as inclusive, so this
+    /// entry used to satisfy *both* periods' `inBudgetPeriod` filter and get counted in each —
+    /// e.g. an October 1 entry inflating September's `totalSpent` even though Wallets (which
+    /// never filters by period) showed the correct, singular amount. Regression test for that
+    /// exact bug.
+    func testEntryDatedExactlyTheFirstOfTheMonthCountsOnlyInThatMonthNotThePrevious() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory()
+
+        let octoberFirstEntry = TestSupport.makeEntry(amount: 50, date: testDate(2026, 10, 1), type: .expense, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(octoberFirstEntry)
+
+        let septemberSummary = BudgetCalculator.periodSpendingSummary(
+            month: testDate(2026, 9, 1),
+            entries: [octoberFirstEntry],
+            budgets: [],
+            headCategories: [head],
+            settings: testSettings(includeUnplannedAsOtherExpenses: true),
+            respectHiddenCategories: true
+        )
+        let octoberSummary = BudgetCalculator.periodSpendingSummary(
+            month: testDate(2026, 10, 1),
+            entries: [octoberFirstEntry],
+            budgets: [],
+            headCategories: [head],
+            settings: testSettings(includeUnplannedAsOtherExpenses: true),
+            respectHiddenCategories: true
+        )
+
+        XCTAssertEqual(septemberSummary.totalSpent, 0, "an Oct 1 entry must not count toward September")
+        XCTAssertEqual(octoberSummary.totalSpent, 50, "an Oct 1 entry must count toward October")
+    }
+
     func testBudgetLimitStaysCalendarMonthWhileActualSpendingUsesTheCycle() {
         let context = TestSupport.makeInMemoryContext()
         let wallet = TestSupport.makeWallet()

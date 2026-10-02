@@ -167,6 +167,10 @@ struct AskClarityQuery: Equatable {
     /// "Spending trend," "how has my income trended the last 6 months" — the same metric/subject
     /// computed across several consecutive equivalent periods (`.trend`) instead of just one.
     var wantsTrend = false
+    /// "Which day did I spend the most on restaurants?" — a day-level ranking within the period,
+    /// distinct from `ranking` (categories/transactions) even though both can share the same
+    /// "most/least" keyword; `ranking` still supplies the direction when present.
+    var wantsDayRanking = false
     /// The explicit period count named alongside `wantsTrend` (e.g. "the last 6 months") — `nil`
     /// when `wantsTrend` came from a bare keyword ("trend," "month by month") with no number
     /// named, letting `AskClarityExecutor` fall back to its own default span.
@@ -251,6 +255,7 @@ enum AskClarityInterpreter {
         query.wantsAssessment = containsAny(normalized, ["too much", "overspending on", "too high", "excessive", "spending a lot on"])
         query.wantsChangeSummary = containsAny(normalized, ["what changed", "what's changed", "what has changed"])
         query.wantsBreakdown = parseBreakdown(normalized)
+        query.wantsDayRanking = parseDayRanking(normalized)
         let trendMatch = parseTrend(normalized)
         query.wantsTrend = trendMatch.wantsTrend
         query.trendSpan = trendMatch.span
@@ -273,7 +278,7 @@ enum AskClarityInterpreter {
         let isMinimalFollowUp = query.metric == nil && query.ranking == nil && query.direction == nil
             && query.budgetState == nil && !query.wantsWhyExplanation && !query.wantsReduceAdvice
             && !query.wantsAssessment && !query.wantsList && !query.wantsChangeSummary
-            && !query.wantsBreakdown && !query.wantsTrend
+            && !query.wantsBreakdown && !query.wantsTrend && !query.wantsDayRanking
         query.isMinimalFollowUp = isMinimalFollowUp
         let shouldInheritContext = usedContextualReference || isMinimalFollowUp
 
@@ -292,7 +297,7 @@ enum AskClarityInterpreter {
         let hasAnySignal = query.metric != nil || query.categoryMatch != nil || query.categoryComparison != nil
             || query.ranking != nil || query.direction != nil || query.budgetState != nil || query.wantsWhyExplanation
             || query.wantsReduceAdvice || query.periodMatch != nil || query.comparisonRequested
-            || query.wantsChangeSummary || query.wantsBreakdown || query.wantsTrend
+            || query.wantsChangeSummary || query.wantsBreakdown || query.wantsTrend || query.wantsDayRanking
         guard hasAnySignal else { return nil }
 
         return query
@@ -676,6 +681,13 @@ enum AskClarityInterpreter {
 
     private static func parseBreakdown(_ text: String) -> Bool {
         containsAny(text, ["breakdown", "break down", "broken down", "by category", "split by category", "each category"])
+    }
+
+    /// "Which day did I spend the most on restaurants," "what day did I spend more eating out" —
+    /// a day-level ranking question. Checked as a phrase (not a single keyword) since "day" alone
+    /// is far too common a word to key off of.
+    private static func parseDayRanking(_ text: String) -> Bool {
+        containsAny(text, ["which day", "what day", "which days", "what days"])
     }
 
     private static let trendKeywordPhrases = [

@@ -813,6 +813,55 @@ final class AskClarityEngineRankingTests: XCTestCase {
     }
 }
 
+// MARK: - Engine: day ranking
+
+final class AskClarityEngineDayRankingTests: XCTestCase {
+    func testWhichDayDidISpendTheMostOverall() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let dining = TestSupport.makeCategory(name: "Dining", headCategory: head)
+        let small = TestSupport.makeEntry(amount: 20, date: testDate(2025, 6, 3), type: .expense, category: dining, wallet: wallet)
+        let big = TestSupport.makeEntry(amount: 85, date: testDate(2025, 6, 12), type: .expense, category: dining, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(dining); context.insert(small); context.insert(big)
+
+        let result = AskClarityEngine.respond(to: "Which day did I spend the most?", context: .empty, entries: [small, big], budgets: [], headCategories: [head], settings: testSettings(), today: today)
+
+        XCTAssertTrue(result.answer.hasSufficientData)
+        XCTAssertTrue(result.answer.headline.contains("85"), result.answer.headline)
+        XCTAssertTrue(result.answer.headline.contains("12"), result.answer.headline)
+    }
+
+    func testWhichDayDidISpendMoreOnACategory() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let dining = TestSupport.makeCategory(name: "Dining", headCategory: head)
+        let groceries = TestSupport.makeCategory(name: "Groceries", headCategory: head)
+        let diningSmall = TestSupport.makeEntry(amount: 15, date: testDate(2025, 6, 4), type: .expense, category: dining, wallet: wallet)
+        let diningBig = TestSupport.makeEntry(amount: 60, date: testDate(2025, 6, 18), type: .expense, category: dining, wallet: wallet)
+        // A bigger same-day grocery entry must not win — the question is scoped to Dining.
+        let groceriesBig = TestSupport.makeEntry(amount: 200, date: testDate(2025, 6, 4), type: .expense, category: groceries, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(dining); context.insert(groceries)
+        context.insert(diningSmall); context.insert(diningBig); context.insert(groceriesBig)
+
+        let result = AskClarityEngine.respond(
+            to: "Which day did I spend more on Dining?", context: .empty, entries: [diningSmall, diningBig, groceriesBig],
+            budgets: [], headCategories: [head], settings: testSettings(), today: today
+        )
+
+        XCTAssertTrue(result.answer.headline.contains("60"), result.answer.headline)
+        XCTAssertTrue(result.answer.headline.contains("18"), result.answer.headline)
+        XCTAssertTrue(result.answer.headline.contains("Dining"), result.answer.headline)
+    }
+
+    func testWhichDaysWithNoSpendingReportsInsufficientData() {
+        let result = AskClarityEngine.respond(to: "Which day did I spend the most?", context: .empty, entries: [], budgets: [], headCategories: [], settings: testSettings(), today: today)
+
+        XCTAssertFalse(result.answer.hasSufficientData)
+    }
+}
+
 // MARK: - Engine: comparisons
 
 final class AskClarityEngineComparisonTests: XCTestCase {
@@ -905,6 +954,59 @@ final class AskClarityEngineBudgetStateTests: XCTestCase {
         let result = AskClarityEngine.respond(to: "Am I within my budget?", context: .empty, entries: [expense], budgets: [budget], headCategories: [head], settings: testSettings(), today: today)
 
         XCTAssertTrue(result.answer.headline.contains("within budget"), result.answer.headline)
+        XCTAssertTrue(result.answer.supportingDetail.contains("40"), result.answer.supportingDetail)
+        XCTAssertTrue(result.answer.supportingDetail.contains("200"), result.answer.supportingDetail)
+    }
+
+    /// The regression this whole fix is for: previously, "Am I within my budget?" reused the
+    /// exact same per-category-list code path as "which categories are within budget?" — so if
+    /// every *individual* budgeted category happened to be over/near its own small limit, the
+    /// answer became "No budgeted categories are within budget," even when overall spending
+    /// (against total income, not just the sum of category limits) was comfortably fine. This
+    /// reproduces exactly that shape — one budgeted category, over its own limit — and asserts
+    /// the overall answer now reflects the *total* picture instead.
+    func testAmIWithinMyBudgetOverallReflectsTotalIncomeNotJustPerCategoryLimits() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let category = TestSupport.makeCategory(name: "Dining", headCategory: head)
+        let budget = TestSupport.makeBudget(category: category, monthlyLimit: 100, month: 6, year: 2025)
+        let income = TestSupport.makeEntry(amount: 3000, date: testDate(2025, 6, 1), type: .income, wallet: wallet)
+        // Dining is over its own €100 limit — the old per-category path would find zero
+        // "on track" categories and answer "No budgeted categories are within budget."
+        let expense = TestSupport.makeEntry(amount: 150, date: testDate(2025, 6, 10), type: .expense, category: category, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(category); context.insert(budget); context.insert(income); context.insert(expense)
+
+        let result = AskClarityEngine.respond(
+            to: "Am I within my budget?", context: .empty, entries: [income, expense], budgets: [budget], headCategories: [head], settings: testSettings(), today: today
+        )
+
+        XCTAssertTrue(result.answer.hasSufficientData)
+        XCTAssertTrue(result.answer.headline.contains("within budget"), result.answer.headline)
+        XCTAssertFalse(result.answer.headline.lowercased().contains("no budgeted categories"), result.answer.headline)
+        XCTAssertEqual(result.answer.comparisonIsFavorable, true)
+    }
+
+    func testWhichCategoriesAreWithinBudget() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let over = TestSupport.makeCategory(name: "Dining", headCategory: head)
+        let onTrack = TestSupport.makeCategory(name: "Groceries", headCategory: head)
+        let overBudget = TestSupport.makeBudget(category: over, monthlyLimit: 100, month: 6, year: 2025)
+        let onTrackBudget = TestSupport.makeBudget(category: onTrack, monthlyLimit: 200, month: 6, year: 2025)
+        let overExpense = TestSupport.makeEntry(amount: 150, date: testDate(2025, 6, 10), type: .expense, category: over, wallet: wallet)
+        let onTrackExpense = TestSupport.makeEntry(amount: 40, date: testDate(2025, 6, 10), type: .expense, category: onTrack, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(over); context.insert(onTrack)
+        context.insert(overBudget); context.insert(onTrackBudget); context.insert(overExpense); context.insert(onTrackExpense)
+
+        let result = AskClarityEngine.respond(
+            to: "Which categories are within budget?", context: .empty, entries: [overExpense, onTrackExpense],
+            budgets: [overBudget, onTrackBudget], headCategories: [head], settings: testSettings(), today: today
+        )
+
+        XCTAssertTrue(result.answer.headline.contains("Groceries"), result.answer.headline)
+        XCTAssertFalse(result.answer.headline.contains("Dining"), result.answer.headline)
     }
 
     func testIsASpecificCategoryOverBudget() {
@@ -1425,6 +1527,36 @@ final class AskClarityPlannerSimpleQueryTests: XCTestCase {
         XCTAssertEqual(plan.operation, .budgetState)
         XCTAssertEqual(plan.budgetState, .withinBudget)
         XCTAssertTrue(plan.subjects.isEmpty, "no category was named, so this is a global check")
+        XCTAssertEqual(plan.budgetScope, .overall, "\"Am I within my budget?\" has no \"categories\"/\"expenses\" wording, so it's the overall totals question")
+    }
+
+    /// The plural counterpart to the test above — "which categories" must plan to the
+    /// per-category list, never the overall totals verdict, even though both phrasings recognize
+    /// the same `AskClarityBudgetStateQuery` and name no single category.
+    func testWhichCategoriesBudgetQuestionProducesAPerCategoryScopedPlan() {
+        guard let query = AskClarityInterpreter.interpret("Which categories are within budget?", categories: [], context: .empty, today: today) else {
+            return XCTFail("should interpret")
+        }
+        guard case .plan(let plan) = AskClarityPlanner.plan(for: query, context: .empty, today: today) else {
+            return XCTFail("a budget-state question should produce a Plan")
+        }
+        XCTAssertEqual(plan.operation, .budgetState)
+        XCTAssertEqual(plan.budgetState, .withinBudget)
+        XCTAssertTrue(plan.subjects.isEmpty)
+        XCTAssertEqual(plan.budgetScope, .perCategory, "\"which categories\" is a per-category list, not the overall totals question")
+    }
+
+    /// "Which day...more" has no "most/biggest/highest" ranking keyword of its own, so the planner
+    /// must default the day ranking's direction to `.highest` rather than leaving it unresolved.
+    func testWhichDayQuestionProducesARankDaysPlanDefaultingToHighest() {
+        guard let query = AskClarityInterpreter.interpret("Which day did I spend more eating out?", categories: [], context: .empty, today: today) else {
+            return XCTFail("should interpret")
+        }
+        guard case .plan(let plan) = AskClarityPlanner.plan(for: query, context: .empty, today: today) else {
+            return XCTFail("a day-ranking question should produce a Plan")
+        }
+        XCTAssertEqual(plan.operation, .rankDays)
+        XCTAssertEqual(plan.ranking?.direction, .highest)
     }
 }
 

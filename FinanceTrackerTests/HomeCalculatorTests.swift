@@ -351,3 +351,46 @@ final class HomeCalculatorUpcomingTests: XCTestCase {
         XCTAssertEqual(capped.map(\.amount), [40, 30, 20])
     }
 }
+
+// MARK: - Average daily allowance
+
+final class HomeCalculatorAverageDailyAllowanceTests: XCTestCase {
+
+    func testSplitsRemainingAmountAcrossDaysIncludingToday() {
+        // Sep 27 through Sep 30 (period end, exclusive) => 3 days remaining: 27, 28, 29.
+        let result = HomeCalculator.averageDailyAllowance(
+            totalLeft: 90, periodEnd: testDate(2026, 9, 30), today: testDate(2026, 9, 27)
+        )
+        XCTAssertEqual(result, 30)
+    }
+
+    func test28DayFebruaryIsHandledLikeAnyOtherMonthLength() {
+        // Feb 1 through Mar 1 (exclusive) in a non-leap year => 28 days remaining.
+        let result = HomeCalculator.averageDailyAllowance(
+            totalLeft: 280, periodEnd: testDate(2026, 3, 1), today: testDate(2026, 2, 1)
+        )
+        XCTAssertEqual(result, 10)
+    }
+
+    func test31DayMonthIsHandledLikeAnyOtherMonthLength() {
+        // Jan 1 through Feb 1 (exclusive) => 31 days remaining.
+        let result = HomeCalculator.averageDailyAllowance(
+            totalLeft: 310, periodEnd: testDate(2026, 2, 1), today: testDate(2026, 1, 1)
+        )
+        XCTAssertEqual(result, 10)
+    }
+
+    func testNilWhenNothingIsLeftToSpend() {
+        let result = HomeCalculator.averageDailyAllowance(
+            totalLeft: 0, periodEnd: testDate(2026, 9, 30), today: testDate(2026, 9, 27)
+        )
+        XCTAssertNil(result)
+    }
+
+    func testNilWhenPeriodHasAlreadyEnded() {
+        let result = HomeCalculator.averageDailyAllowance(
+            totalLeft: 50, periodEnd: testDate(2026, 9, 27), today: testDate(2026, 9, 30)
+        )
+        XCTAssertNil(result)
+    }
+}

@@ -24,6 +24,9 @@ struct FinanceTrackerApp: App {
         if CollaborationFeatureFlag.isEnabled {
             CollaborationSyncService.configureShared(modelContext: container.mainContext)
         }
+        // So a transaction logged silently by a Shortcuts Automation (no app UI open) can still
+        // confirm itself via a push notification — see `TransactionConfirmationNotifier`.
+        TransactionConfirmationNotifier.requestAuthorizationIfNeeded()
     }
 
     var body: some Scene {

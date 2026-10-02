@@ -66,12 +66,20 @@ struct TransactionFromTextIntent: AppIntent {
             return .result(dialog: "No wallet is set up in Clarity yet — open the app first to create one.")
         }
 
+        // Same auto-mark `AddTransactionView`/`LogExpenseIntent` apply — see
+        // `matchesFixedPlannedAmount`'s doc comment.
+        let now = Date.now
+        let allBudgets = (try? context.fetch(FetchDescriptor<Budget>())) ?? []
+        let autoPlanned = allBudgets.matchesFixedPlannedAmount(Decimal(confirmedAmount), for: categoryModel, month: now)
+
         let entry = Entry(
             amount: Decimal(confirmedAmount),
+            date: now,
             note: confirmedNote,
             type: .expense,
             category: categoryModel,
-            wallet: wallet
+            wallet: wallet,
+            isPlannedExpense: autoPlanned
         )
         context.insert(entry)
         try context.save()

@@ -185,8 +185,10 @@ enum ExplainMyMonthCalculator {
                 id: "explain-category-\(currentCategory.category.persistentModelID)",
                 kind: .categoryChange,
                 subject: currentCategory.category.name,
+                headCategory: currentCategory.category.headCategory,
                 direction: fraction > 0 ? .up : .down,
                 magnitudeFraction: abs(fraction),
+                amountDifference: currentCategory.actual - previousCategory.actual,
                 severity: .informational,
                 isFavorable: fraction > 0 ? false : true
             )

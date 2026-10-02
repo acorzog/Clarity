@@ -64,6 +64,33 @@ final class OverviewSummaryActivityTests: XCTestCase {
     }
 }
 
+final class InsightsBudgetBarStatusTests: XCTestCase {
+    /// The bug this whole enum replaced: a category with no budget planned at all (`planned ==
+    /// 0`) but real spending against it must read as over, not silently default to the same
+    /// green as a comfortably-under-budget category.
+    func testZeroPlannedWithActualSpendIsOver() {
+        XCTAssertEqual(InsightsView.budgetBarStatus(planned: 0, actual: 53.20), .over)
+    }
+
+    func testZeroPlannedWithNoSpendIsUnderBudgetNotOver() {
+        XCTAssertEqual(InsightsView.budgetBarStatus(planned: 0, actual: 0), .underBudget)
+    }
+
+    func testActualExceedingPlannedIsOver() {
+        XCTAssertEqual(InsightsView.budgetBarStatus(planned: 16, actual: 33.55), .over)
+    }
+
+    /// Hitting the plan exactly must be distinguishable from comfortably under — both used to
+    /// render as the same `.emerald` before this fix.
+    func testActualEqualToPlannedIsMetExactlyNotUnderBudget() {
+        XCTAssertEqual(InsightsView.budgetBarStatus(planned: 1731.91, actual: 1731.91), .metExactly)
+    }
+
+    func testActualBelowPlannedIsUnderBudget() {
+        XCTAssertEqual(InsightsView.budgetBarStatus(planned: 550, actual: 389.25), .underBudget)
+    }
+}
+
 final class InsightsAccessibilityTests: XCTestCase {
     func testPlannedVsActualEmptyDataProducesMeaningfulSummary() {
         let summary = InsightsView.plannedVsActualAccessibilitySummary(data: [])

@@ -25,10 +25,8 @@ struct InsightsView: View {
         )
     }
 
-    /// Most-planned-first so the categories most worth a glance land in the initially visible
-    /// area of the horizontally-scrolling chart, instead of in whatever order `HeadCategory.
-    /// sortOrder` happens to put them — with many categories, that order could bury a
-    /// heavily-planned one off the right edge, behind a lightly-planned or unplanned one.
+    /// Most-planned-first so the categories most worth a glance land at the top of the list,
+    /// instead of in whatever order `HeadCategory.sortOrder` happens to put them.
     private var headComparisons: [HeadComparison] {
         summary.byHeadCategory
             .map { HeadComparison(id: $0.headCategory.id, name: $0.headCategory.name, planned: $0.planned, actual: $0.actual) }
@@ -66,7 +64,29 @@ struct InsightsView: View {
     }
 }
 
+/// A category's `PlannedVsActualRow` bar/color state. Three states, not two: a bare "over vs.
+/// not over" boolean can't tell "hit the plan exactly" apart from "comfortably under" — both
+/// used to render identically as `.emerald`. `.over` also now includes the zero-planned case
+/// (any actual spend against a $0 plan is unambiguously over, not "under" by the old `planned >
+/// 0` guard that made it default to `.emerald`/green).
+enum BudgetBarStatus: Equatable {
+    case underBudget
+    case metExactly
+    case over
+}
+
 extension InsightsView {
+    /// Classifies `actual` against `planned` for `PlannedVsActualRow`'s bar fill/text color.
+    /// Exposed for testing.
+    static func budgetBarStatus(planned: Decimal, actual: Decimal) -> BudgetBarStatus {
+        guard planned > 0 else {
+            return actual > 0 ? .over : .underBudget
+        }
+        if actual > planned { return .over }
+        if actual == planned { return .metExactly }
+        return .underBudget
+    }
+
     /// Combined VoiceOver summary for the Planned vs. Actual grouped-bar chart — previously
     /// silent to VoiceOver, matching the exact gap Phase 2F/2F-B already fixed for the donut/trend
     /// charts elsewhere in the app (Phase 2J). Reads already-computed `planned`/`actual` values,
@@ -119,50 +139,90 @@ private struct PlannedVsActualCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 24)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Chart(data) { item in
-                        BarMark(
-                            x: .value("Category", item.name),
-                            y: .value("Amount", item.planned.doubleValue)
-                        )
-                        .foregroundStyle(by: .value("Type", "Planned"))
-                        .position(by: .value("Type", "Planned"))
-
-                        BarMark(
-                            x: .value("Category", item.name),
-                            y: .value("Amount", item.actual.doubleValue)
-                        )
-                        .foregroundStyle(by: .value("Type", "Actual"))
-                        .position(by: .value("Type", "Actual"))
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 16) {
+                        legendDot(color: .skyBlue.opacity(0.2), label: "Planned")
+                        legendDot(color: .emerald, label: "Under")
                     }
-                    .chartForegroundStyleScale([
-                        "Planned": Color.skyBlue,
-                        "Actual": Color.emerald
-                    ])
-                    .chartXAxis {
-                        AxisMarks { _ in
-                            AxisValueLabel()
-                                .foregroundStyle(Color.white.opacity(0.5))
-                        }
+                    HStack(spacing: 16) {
+                        legendDot(color: .skyBlue, label: "On Budget")
+                        legendDot(color: .expenseRed, label: "Over")
                     }
-                    .chartYAxis {
-                        AxisMarks { _ in
-                            AxisGridLine().foregroundStyle(Color.white.opacity(0.08))
-                        }
-                    }
-                    .chartLegend(position: .bottom, spacing: 8)
-                    .frame(width: max(300, CGFloat(data.count) * 90), height: 200)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(
-                        InsightsView.plannedVsActualAccessibilitySummary(
-                            data: data.map { (name: $0.name, planned: $0.planned, actual: $0.actual) }
-                        )
-                    )
                 }
+
+                VStack(spacing: 16) {
+                    ForEach(data) { item in
+                        PlannedVsActualRow(item: item)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    InsightsView.plannedVsActualAccessibilitySummary(
+                        data: data.map { (name: $0.name, planned: $0.planned, actual: $0.actual) }
+                    )
+                )
             }
         }
         .padding(20)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func legendDot(color: Color, label: String) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.5))
+        }
+    }
+}
+
+/// One category's planned-vs-actual as a single track-and-fill bar rather than a pair of grouped
+/// `BarMark`s — replaces the former horizontally-scrolling Swift Charts view (which needed
+/// `ScrollView(.horizontal)` once `data.count * 90pt` exceeded screen width) with a vertical list
+/// that scales to any number of categories using only the screen's existing vertical scroll.
+private struct PlannedVsActualRow: View {
+    let item: HeadComparison
+
+    /// Fraction of the track actually filled — capped at 1 so an over-planned category still
+    /// reads as "full," with the red color (not an overflowing bar) communicating the overage.
+    private var progress: Double {
+        guard item.planned > 0 else { return item.actual > 0 ? 1 : 0 }
+        return min((item.actual / item.planned).doubleValue, 1)
+    }
+
+    private var status: BudgetBarStatus { InsightsView.budgetBarStatus(planned: item.planned, actual: item.actual) }
+
+    private var fillColor: Color {
+        switch status {
+        case .over: return .expenseRed
+        case .metExactly: return .skyBlue
+        case .underBudget: return .emerald
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(item.name)
+                    .font(.subheadline)
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("\(item.actual.currencyFormatted) / \(item.planned.currencyFormatted)")
+                    .font(.caption)
+                    .foregroundStyle(status == .over ? Color.expenseRed : Color.white.opacity(0.5))
+            }
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.skyBlue.opacity(0.2))
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(fillColor)
+                        .frame(width: geometry.size.width * progress)
+                }
+            }
+            .frame(height: 8)
+        }
     }
 }
 
