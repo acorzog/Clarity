@@ -52,6 +52,45 @@ final class ClarityScoreCalculatorTests: XCTestCase {
         XCTAssertEqual(result.trend, .notEnoughHistory)
     }
 
+    /// A known, planned expense (rent, a quarterly tax bill) isn't evidence of impulsive
+    /// overspending — pacing must treat it exactly like having no data at all, the same guarantee
+    /// `testExcludedAndIncomeEntriesAreIgnoredEntirely` already locks in for excluded/income entries.
+    func testPlannedExpensesAreIgnoredByPacingFactors() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        context.insert(wallet)
+
+        let rent = TestSupport.makeEntry(amount: 500, date: testDate(2025, 6, 15), type: .expense, wallet: wallet, isPlannedExpense: true)
+        context.insert(rent)
+
+        let result = ClarityScoreCalculator.clarityScore(entries: [rent], budgets: [], headCategories: [], today: today)
+
+        XCTAssertNil(result.score)
+        XCTAssertEqual(result.trend, .notEnoughHistory)
+    }
+
+    /// Mixed week: a planned rent charge large enough to blow every pacing factor if counted,
+    /// alongside the exact same regular expense as `testBudgetPaceFactorWhenUnderBudget`. The
+    /// result must match that test's numbers exactly — the rent stays invisible to pacing, but
+    /// (unlike `excludeFromBudget`) it's still a perfectly normal `Entry` elsewhere, e.g. still
+    /// counted by `BudgetCalculator`/Remaining, which this calculator never touches.
+    func testPlannedExpenseDoesNotSkewBudgetPaceWhenMixedWithRegularSpending() {
+        let context = TestSupport.makeInMemoryContext()
+        let (wallet, budget) = makeBudgetSetup(in: context, monthlyLimit: 300) // 300/30 days * 7 = 70/week
+        let expense = TestSupport.makeEntry(amount: 35, date: testDate(2025, 6, 15), type: .expense, wallet: wallet)
+        let rent = TestSupport.makeEntry(amount: 900, date: testDate(2025, 6, 15), type: .expense, wallet: wallet, isPlannedExpense: true)
+        context.insert(expense); context.insert(rent)
+
+        let result = ClarityScoreCalculator.clarityScore(
+            entries: [expense, rent], budgets: [budget], headCategories: [budget.category.headCategory], today: today
+        )
+
+        XCTAssertEqual(result.score, 83)
+        let factor = result.factors.first { $0.kind == .budgetPace }
+        XCTAssertEqual(factor?.isFavorable, true)
+        XCTAssertEqual(factor?.impact, 13)
+    }
+
     // MARK: - Individual factors
 
     func testBudgetPaceFactorWhenOverBudget() {

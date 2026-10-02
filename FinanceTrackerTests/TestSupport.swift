@@ -49,9 +49,13 @@ enum TestSupport {
         name: String = "Category",
         isIncome: Bool = false,
         isArchived: Bool = false,
+        isFixedPlannedCategory: Bool = false,
         headCategory: HeadCategory
     ) -> FinanceTracker.Category {
-        FinanceTracker.Category(name: name, isArchived: isArchived, isIncome: isIncome, headCategory: headCategory)
+        FinanceTracker.Category(
+            name: name, isArchived: isArchived, isIncome: isIncome,
+            isFixedPlannedCategory: isFixedPlannedCategory, headCategory: headCategory
+        )
     }
 
     static func makeBudget(
@@ -72,7 +76,9 @@ enum TestSupport {
         category: FinanceTracker.Category? = nil,
         wallet: Wallet,
         destinationWallet: Wallet? = nil,
-        excludeFromBudget: Bool = false
+        recurrence: RecurrenceRule = .none,
+        excludeFromBudget: Bool = false,
+        isPlannedExpense: Bool = false
     ) -> Entry {
         Entry(
             amount: amount,
@@ -81,7 +87,9 @@ enum TestSupport {
             category: category,
             wallet: wallet,
             destinationWallet: destinationWallet,
-            excludeFromBudget: excludeFromBudget
+            recurrence: recurrence,
+            excludeFromBudget: excludeFromBudget,
+            isPlannedExpense: isPlannedExpense
         )
     }
 

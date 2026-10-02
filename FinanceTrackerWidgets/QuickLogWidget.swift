@@ -24,13 +24,13 @@ struct QuickLogWidgetView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "plus.circle.fill")
+            Image(systemName: "mic.circle.fill")
                 .font(.system(size: 34))
                 .foregroundStyle(LinearGradient.emeraldSky)
-            Text("Add Expense")
+            Text("Voice Expense")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white)
-            Text("Quick Log")
+            Text("Open to record")
                 .font(.system(size: 10))
                 .foregroundStyle(.white.opacity(0.5))
         }
@@ -38,7 +38,7 @@ struct QuickLogWidgetView: View {
         .containerBackground(for: .widget) {
             Color.appBackground
         }
-        .widgetURL(URL(string: "financetracker://add-transaction"))
+        .widgetURL(URL(string: "financetracker://voice-expense"))
     }
 }
 
@@ -49,8 +49,8 @@ struct QuickLogWidget: Widget {
         StaticConfiguration(kind: kind, provider: QuickLogProvider()) { entry in
             QuickLogWidgetView(entry: entry)
         }
-        .configurationDisplayName("Quick Log")
-        .description("Jump straight to adding a new transaction.")
+        .configurationDisplayName("Voice Expense")
+        .description("Open Clarity and record an expense by voice.")
         .supportedFamilies([.systemSmall])
     }
 }

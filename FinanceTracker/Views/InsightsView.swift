@@ -64,7 +64,29 @@ struct InsightsView: View {
     }
 }
 
+/// A category's `PlannedVsActualRow` bar/color state. Three states, not two: a bare "over vs.
+/// not over" boolean can't tell "hit the plan exactly" apart from "comfortably under" — both
+/// used to render identically as `.emerald`. `.over` also now includes the zero-planned case
+/// (any actual spend against a $0 plan is unambiguously over, not "under" by the old `planned >
+/// 0` guard that made it default to `.emerald`/green).
+enum BudgetBarStatus: Equatable {
+    case underBudget
+    case metExactly
+    case over
+}
+
 extension InsightsView {
+    /// Classifies `actual` against `planned` for `PlannedVsActualRow`'s bar fill/text color.
+    /// Exposed for testing.
+    static func budgetBarStatus(planned: Decimal, actual: Decimal) -> BudgetBarStatus {
+        guard planned > 0 else {
+            return actual > 0 ? .over : .underBudget
+        }
+        if actual > planned { return .over }
+        if actual == planned { return .metExactly }
+        return .underBudget
+    }
+
     /// Combined VoiceOver summary for the Planned vs. Actual grouped-bar chart — previously
     /// silent to VoiceOver, matching the exact gap Phase 2F/2F-B already fixed for the donut/trend
     /// charts elsewhere in the app (Phase 2J). Reads already-computed `planned`/`actual` values,
@@ -117,11 +139,15 @@ private struct PlannedVsActualCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 24)
             } else {
-                HStack(spacing: 16) {
-                    legendDot(color: .skyBlue, label: "Planned")
-                    legendDot(color: .emerald, label: "Actual")
-                    legendDot(color: .expenseRed, label: "Over")
-                    Spacer()
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 16) {
+                        legendDot(color: .skyBlue.opacity(0.2), label: "Planned")
+                        legendDot(color: .emerald, label: "Under")
+                    }
+                    HStack(spacing: 16) {
+                        legendDot(color: .skyBlue, label: "On Budget")
+                        legendDot(color: .expenseRed, label: "Over")
+                    }
                 }
 
                 VStack(spacing: 16) {
@@ -165,8 +191,15 @@ private struct PlannedVsActualRow: View {
         return min((item.actual / item.planned).doubleValue, 1)
     }
 
-    private var isOverPlanned: Bool { item.planned > 0 && item.actual > item.planned }
-    private var fillColor: Color { isOverPlanned ? .expenseRed : .emerald }
+    private var status: BudgetBarStatus { InsightsView.budgetBarStatus(planned: item.planned, actual: item.actual) }
+
+    private var fillColor: Color {
+        switch status {
+        case .over: return .expenseRed
+        case .metExactly: return .skyBlue
+        case .underBudget: return .emerald
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -177,7 +210,7 @@ private struct PlannedVsActualRow: View {
                 Spacer()
                 Text("\(item.actual.currencyFormatted) / \(item.planned.currencyFormatted)")
                     .font(.caption)
-                    .foregroundStyle(isOverPlanned ? Color.expenseRed : Color.white.opacity(0.5))
+                    .foregroundStyle(status == .over ? Color.expenseRed : Color.white.opacity(0.5))
             }
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {

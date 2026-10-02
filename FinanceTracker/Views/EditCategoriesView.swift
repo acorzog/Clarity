@@ -10,12 +10,17 @@ struct CategoriesView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
     @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    // Also watched directly (not just reached via `head.categories`) so archiving/restoring a
+    // category actually re-renders this screen — see `RemovedCategoriesView`'s doc comment on the
+    // same `@Query<HeadCategory>`-doesn't-see-`Category`-changes issue this was already exposed to.
+    @Query private var allCategories: [Category]
 
     @State private var isRemoving = false
     @State private var showingNewCategory = false
     @State private var editingCategory: Category?
     @State private var editingHeadCategory: HeadCategory?
     @State private var headsShowingArchived: Set<PersistentIdentifier> = []
+    @State private var showingRemovedCategories = false
 
     private let gridColumns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 4)
 
@@ -38,19 +43,25 @@ struct CategoriesView: View {
     }
 
     private func activeCategories(for head: HeadCategory) -> [Category] {
-        head.categories.filter { !$0.isArchived }.sorted { $0.name < $1.name }
+        allCategories
+            .filter { $0.headCategory.persistentModelID == head.persistentModelID && !$0.isArchived }
+            .sorted { $0.name < $1.name }
     }
 
     private func archivedCategories(for head: HeadCategory) -> [Category] {
-        head.categories.filter { $0.isArchived }.sorted { $0.name < $1.name }
+        allCategories
+            .filter { $0.headCategory.persistentModelID == head.persistentModelID && $0.isArchived }
+            .sorted { $0.name < $1.name }
     }
 
     private func archive(_ category: Category) {
         category.isArchived = true
+        try? modelContext.save()
     }
 
     private func restore(_ category: Category) {
         category.isArchived = false
+        try? modelContext.save()
     }
 
     private func toggleArchivedVisibility(for head: HeadCategory) {
@@ -130,6 +141,15 @@ struct CategoriesView: View {
                 } label: {
                     Image(systemName: isRemoving ? "checkmark" : "pencil")
                 }
+                .accessibilityLabel(isRemoving ? "Done Removing Categories" : "Remove Categories")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingRemovedCategories = true
+                } label: {
+                    Image(systemName: "arrow.uturn.backward.circle")
+                }
+                .accessibilityLabel("Removed Categories")
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -138,6 +158,10 @@ struct CategoriesView: View {
                     Image(systemName: "plus")
                 }
             }
+        }
+        .sheet(isPresented: $showingRemovedCategories) {
+            RemovedCategoriesView()
+                .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showingNewCategory) {
             NavigationStack {

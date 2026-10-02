@@ -13,6 +13,14 @@ final class Category {
     var isArchived: Bool
     /// Marks a category used for income entries/budgets rather than expenses.
     var isIncome: Bool
+    /// Marks a category whose monthly budget is normally covered by a single matching charge
+    /// (rent, a fixed accountant/"Gestor" fee, a tax bill) rather than many smaller purchases
+    /// (groceries, eating out). Used only to auto-mark a new expense `Entry` as `isPlannedExpense`
+    /// when its amount exactly matches this category's planned budget for the month — see
+    /// `Array<Budget>.matchesFixedPlannedAmount` in `BudgetQuerying.swift`. The `= false` default
+    /// here (not just on the init parameter) is required for SwiftData's lightweight migration to
+    /// backfill this attribute on categories that already exist in an installed app's store.
+    var isFixedPlannedCategory: Bool = false
 
     var headCategory: HeadCategory
 
@@ -30,6 +38,7 @@ final class Category {
         isSavings: Bool = false,
         isArchived: Bool = false,
         isIncome: Bool = false,
+        isFixedPlannedCategory: Bool = false,
         headCategory: HeadCategory
     ) {
         self.name = name
@@ -39,6 +48,7 @@ final class Category {
         self.isSavings = isSavings
         self.isArchived = isArchived
         self.isIncome = isIncome
+        self.isFixedPlannedCategory = isFixedPlannedCategory
         self.headCategory = headCategory
     }
 

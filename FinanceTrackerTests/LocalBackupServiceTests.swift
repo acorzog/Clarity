@@ -166,4 +166,22 @@ final class LocalBackupServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.entries.count, 3)
         XCTAssertEqual(snapshot.goalContributions.count, 2)
     }
+
+    /// A real backup exported before `isPlannedExpense` existed has no such key in its entry
+    /// JSON — `EntrySnapshot`'s custom `init(from:)` must still decode it, defaulting to `false`,
+    /// rather than failing the whole restore outright on a missing key.
+    func testEntrySnapshotDecodesOlderBackupsMissingThePlannedExpenseKey() throws {
+        let json = """
+        {"amount":5787.6,"categoryIndex":15,"date":"2026-08-31T22:00:00Z",
+         "excludeFromBudget":false,"note":"","recurrence":"none","type":"income","walletIndex":0}
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(LocalBackupService.EntrySnapshot.self, from: json)
+
+        XCTAssertEqual(snapshot.isPlannedExpense, false)
+        XCTAssertEqual(snapshot.amount, 5787.6)
+        XCTAssertEqual(snapshot.categoryIndex, 15)
+    }
 }

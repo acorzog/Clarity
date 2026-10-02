@@ -70,9 +70,52 @@ enum LocalBackupService {
         var type: EntryType
         var recurrence: RecurrenceRule
         var excludeFromBudget: Bool
+        var isPlannedExpense: Bool
         var categoryIndex: Int?
         var walletIndex: Int
         var destinationWalletIndex: Int?
+
+        init(
+            amount: Decimal,
+            date: Date,
+            note: String,
+            type: EntryType,
+            recurrence: RecurrenceRule,
+            excludeFromBudget: Bool,
+            isPlannedExpense: Bool = false,
+            categoryIndex: Int?,
+            walletIndex: Int,
+            destinationWalletIndex: Int?
+        ) {
+            self.amount = amount
+            self.date = date
+            self.note = note
+            self.type = type
+            self.recurrence = recurrence
+            self.excludeFromBudget = excludeFromBudget
+            self.isPlannedExpense = isPlannedExpense
+            self.categoryIndex = categoryIndex
+            self.walletIndex = walletIndex
+            self.destinationWalletIndex = destinationWalletIndex
+        }
+
+        /// Custom, rather than synthesized, only so `isPlannedExpense` can default to `false`
+        /// when restoring a backup exported before this field existed — every other field is
+        /// decoded exactly as synthesis would. Without this, restoring an older backup (several
+        /// already exist, predating this change) would fail outright on a missing key.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            amount = try container.decode(Decimal.self, forKey: .amount)
+            date = try container.decode(Date.self, forKey: .date)
+            note = try container.decode(String.self, forKey: .note)
+            type = try container.decode(EntryType.self, forKey: .type)
+            recurrence = try container.decode(RecurrenceRule.self, forKey: .recurrence)
+            excludeFromBudget = try container.decode(Bool.self, forKey: .excludeFromBudget)
+            isPlannedExpense = try container.decodeIfPresent(Bool.self, forKey: .isPlannedExpense) ?? false
+            categoryIndex = try container.decodeIfPresent(Int.self, forKey: .categoryIndex)
+            walletIndex = try container.decode(Int.self, forKey: .walletIndex)
+            destinationWalletIndex = try container.decodeIfPresent(Int.self, forKey: .destinationWalletIndex)
+        }
     }
 
     struct BudgetSnapshot: Codable {
@@ -222,7 +265,7 @@ enum LocalBackupService {
         snapshot.entries = entries.map {
             EntrySnapshot(
                 amount: $0.amount, date: $0.date, note: $0.note, type: $0.type, recurrence: $0.recurrence,
-                excludeFromBudget: $0.excludeFromBudget,
+                excludeFromBudget: $0.excludeFromBudget, isPlannedExpense: $0.isPlannedExpense,
                 categoryIndex: $0.category.map { categoryIndex[ObjectIdentifier($0)]! },
                 walletIndex: walletIndex[ObjectIdentifier($0.wallet)]!,
                 destinationWalletIndex: $0.destinationWallet.map { walletIndex[ObjectIdentifier($0)]! }
@@ -363,7 +406,8 @@ enum LocalBackupService {
                 category: $0.categoryIndex.map { categories[$0] },
                 wallet: wallets[$0.walletIndex],
                 destinationWallet: $0.destinationWalletIndex.map { wallets[$0] },
-                recurrence: $0.recurrence, excludeFromBudget: $0.excludeFromBudget
+                recurrence: $0.recurrence, excludeFromBudget: $0.excludeFromBudget,
+                isPlannedExpense: $0.isPlannedExpense
             )
         }
         entries.forEach(context.insert)

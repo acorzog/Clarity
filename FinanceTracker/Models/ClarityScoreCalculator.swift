@@ -70,6 +70,17 @@ struct ClarityScoreResult: Equatable {
 /// via its `previousHead.actual > 0` check). The trend (up/down/stable) is derived by running the
 /// exact same calculation again anchored one week earlier and comparing the two scores — no
 /// separate persisted score history is needed.
+///
+/// An `Entry` marked `isPlannedExpense` (rent, a quarterly tax bill, any expense that's known and
+/// already accounted for in the month's plan) is excluded from every "actual spend" total this
+/// file computes, however it still counts normally everywhere else (`BudgetCalculator`, Remaining,
+/// Safe to Spend) — only this score's week-over-week *pacing* read is affected. A large planned
+/// charge landing on day 1 isn't impulsive overspending; without this, it would spike
+/// `recentWeekTotal` and tank every pacing factor for a week on an expense that was already
+/// planned for. A one-off big purchase, by contrast, still has real pacing signal and is left in.
+/// Deliberately a separate flag from `recurrence` — that field doesn't actually project or repeat
+/// anything (each occurrence is still logged by hand, on purpose), so reusing it here would imply
+/// a connection to automatic recurrence that doesn't exist.
 enum ClarityScoreCalculator {
     static let baselineScore = 70
     static let maxFactors = 3
@@ -94,7 +105,11 @@ enum ClarityScoreCalculator {
         today: Date = .now,
         calendar: Calendar = .current
     ) -> ClarityScoreResult {
-        let expenses = entries.budgetEligible.filter { $0.type == .expense }
+        // `isPlannedExpense` entries are excluded here — see the type-level doc comment — so a
+        // known, already-budgeted charge (rent, a quarterly tax bill) never skews this score's
+        // pacing factors, while still counting normally in every other budget calculation
+        // (`BudgetCalculator` reads `entries` independently of this filtered list).
+        let expenses = entries.budgetEligible.filter { $0.type == .expense && !$0.isPlannedExpense }
 
         guard
             let current = snapshot(expenses: expenses, budgets: budgets, headCategories: headCategories, anchor: today, calendar: calendar)

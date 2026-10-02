@@ -56,7 +56,10 @@ struct RootView: View {
             modelContext.rollback()
         }
         .onOpenURL { url in
-            guard url.scheme == "financetracker", url.host == "add-transaction" else { return }
+            guard
+                url.scheme == "financetracker",
+                url.host == "add-transaction" || url.host == "voice-expense"
+            else { return }
             showingAddTransaction = true
         }
         .sheet(isPresented: $showingAddTransaction) {
