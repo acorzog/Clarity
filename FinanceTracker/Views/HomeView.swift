@@ -1,6 +1,51 @@
 import SwiftUI
 import SwiftData
 
+/// A smaller hero-number style for Home's cards specifically — Home packs more cards on screen
+/// than any other tab, so it uses this instead of the shared `heroAmountStyle()` (34pt, used by
+/// Net Worth here and elsewhere in the app) to keep everything visible without scrolling on
+/// smaller phones. Not a Design System token change — just a Home-local compactness choice.
+private struct CompactHeroAmountStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 32, weight: .bold))
+            .minimumScaleFactor(0.6)
+            .lineLimit(1)
+    }
+}
+
+/// A `SectionCard`-equivalent surface with a low-opacity color wash layered over the standard
+/// `surfaceSecondary` tier, so each Home card can carry its own accent identity (emerald for Safe
+/// to Spend, sky blue for Clarity Score, mint for What's Different — all within the app's
+/// existing green/blue accent range) while still sitting on the same flat, no-shadow surface
+/// treatment (`CLARITY_DESIGN_SYSTEM.md` §10) as every other card in the app — the wash is a
+/// translucent overlay, not a replacement color system.
+private struct TintedSurfaceModifier: ViewModifier {
+    var tint: Color
+    var radius: CGFloat
+    var padding: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(
+                RoundedRectangle(cornerRadius: radius)
+                    .fill(Color.surfaceSecondary)
+                    .overlay(RoundedRectangle(cornerRadius: radius).fill(tint.opacity(0.08)))
+            )
+    }
+}
+
+private extension View {
+    func compactHeroAmountStyle() -> some View {
+        modifier(CompactHeroAmountStyle())
+    }
+
+    func claritySurface(tint: Color, radius: CGFloat = ClarityRadius.large, padding: CGFloat = ClaritySpacing.lg) -> some View {
+        modifier(TintedSurfaceModifier(tint: tint, radius: radius, padding: padding))
+    }
+}
+
 /// Clarity's "Understand" surface — see `CLARITY_HOME_SPEC.md`. Composes already-computed
 /// values from `BudgetCalculator`, `HomeCalculator`, `NetWorthCalculator`, and
 /// `ClarityScoreCalculator`; performs no financial calculation of its own (`CLARITY_HOME_SPEC.md`
@@ -78,9 +123,6 @@ struct HomeView: View {
         )
     }
 
-    private var activeWallets: [Wallet] { Wallet.active(in: allWallets) }
-    private var netWorth: Decimal { NetWorthCalculator.netWorth(wallets: allWallets) }
-
     private var upcomingItems: [UpcomingSharedBalance] {
         HomeCalculator.upcomingSharedBalances(events: sharedEvents)
     }
@@ -100,17 +142,16 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: ClaritySpacing.xxl) {
+                VStack(alignment: .leading, spacing: ClaritySpacing.lg) {
                     header
+                        .padding(.bottom, ClaritySpacing.xs)
                     safeToSpendSection
                     clarityScoreSection
-                    askClaritySection
                     whatsDifferentSection
                     upcomingSection
-                    netWorthSection
                 }
                 .padding(.horizontal)
-                .padding(.top, 8)
+                .padding(.top, 4)
                 .padding(.bottom, 24)
                 .readableContentWidth()
             }
@@ -122,70 +163,170 @@ struct HomeView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(greeting)
-                .font(.body)
-                .foregroundStyle(.textSecondary)
-            Text(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                .font(.sectionTitle)
-                .foregroundStyle(.textPrimary)
+        HStack(alignment: .top, spacing: ClaritySpacing.sm) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(greeting)
+                    .font(.subheadline)
+                    .foregroundStyle(.textSecondary)
+                Text(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.textPrimary)
 
-            if isEffectivelyEmpty {
-                Text("Add a transaction or two, and Home will start filling in.")
-                    .font(.footnote)
-                    .foregroundStyle(.textTertiary)
-                    .padding(.top, ClaritySpacing.xs)
+                if isEffectivelyEmpty {
+                    Text("Add a transaction or two, and Home will start filling in.")
+                        .font(.footnote)
+                        .foregroundStyle(.textTertiary)
+                        .padding(.top, ClaritySpacing.xs)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            NavigationLink {
+                AskClarityView()
+            } label: {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.title3)
+                    .foregroundStyle(LinearGradient.emeraldSky)
+                    .frame(width: 44, height: 44)
+                    .background(Color.surfaceSecondary, in: Circle())
+            }
+            .accessibilityLabel("Ask Clarity")
+            .accessibilityHint("Double tap to start a conversation about your finances")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Safe to Spend (hero)
+
+    /// Fraction of `totalAvailable` spent, clamped to `0...1` for the progress bar's fill width —
+    /// `safeToSpendRatio` itself is allowed to exceed 1 (over budget), but a bar can't render past
+    /// its own track.
+    private var safeToSpendProgress: Double {
+        min(max(safeToSpendRatio, 0), 1)
+    }
+
+    private var spentPercentText: String {
+        guard summary.totalAvailable > 0 else { return "0%" }
+        return safeToSpendRatio.formatted(.percent.precision(.fractionLength(0)))
+    }
+
+    private var leftPercentText: String {
+        guard summary.totalAvailable > 0 else { return "0%" }
+        return max(1 - safeToSpendRatio, 0).formatted(.percent.precision(.fractionLength(0)))
+    }
+
+    private var safeToSpendPerDay: Decimal? {
+        HomeCalculator.averageDailyAllowance(totalLeft: summary.totalLeft, periodEnd: summary.period.end)
+    }
 
     private var safeToSpendSection: some View {
         Button {
             selectedTab = .plan
         } label: {
-            VStack(spacing: ClaritySpacing.sm) {
-                Text("Safe to Spend")
-                    .font(.body)
-                    .foregroundStyle(.textSecondary)
+            VStack(alignment: .leading, spacing: ClaritySpacing.md) {
+                HStack(spacing: ClaritySpacing.sm) {
+                    ZStack {
+                        Circle().fill(Color.income.opacity(0.18))
+                        Image(systemName: "wallet.bifold.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.income)
+                    }
+                    .frame(width: 28, height: 28)
+
+                    Text("SAFE TO SPEND")
+                        .font(.caption2.weight(.semibold))
+                        .tracking(0.5)
+                        .foregroundStyle(.textSecondary)
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.textTertiary)
+                }
 
                 if hasBudgetData {
-                    Text(summary.totalLeft.currencyFormatted)
-                        .heroAmountStyle()
-                        .foregroundStyle(summary.totalLeft < 0 ? Color.expense : Color.textPrimary)
+                    HStack(alignment: .top, spacing: ClaritySpacing.sm) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(summary.totalLeft.currencyFormatted)
+                                .compactHeroAmountStyle()
+                                .foregroundStyle(summary.totalLeft < 0 ? Color.expense : Color.textPrimary)
 
-                    Text(periodRangeText)
-                        .font(.caption)
-                        .foregroundStyle(.textTertiary)
+                            Text(periodRangeText)
+                                .font(.caption2)
+                                .foregroundStyle(.textTertiary)
+                        }
+
+                        Spacer(minLength: ClaritySpacing.sm)
+
+                        if let safeToSpendPerDay {
+                            VStack(spacing: 2) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "calendar")
+                                        .font(.caption2)
+                                    Text("≈ \(safeToSpendPerDay.currencyFormattedSummary)")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .foregroundStyle(.textPrimary)
+                                Text("per day")
+                                    .font(.caption2)
+                                    .foregroundStyle(.textTertiary)
+                            }
+                            .padding(.horizontal, ClaritySpacing.sm)
+                            .padding(.vertical, ClaritySpacing.sm)
+                            .background(Color.surfaceElevated, in: RoundedRectangle(cornerRadius: ClarityRadius.medium))
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("About \(safeToSpendPerDay.currencyFormattedSummary) available per day")
+                        }
+                    }
 
                     HStack(spacing: ClaritySpacing.xs) {
-                        Circle().fill(safeToSpendColor).frame(width: 8, height: 8)
+                        Circle().fill(safeToSpendColor).frame(width: 7, height: 7)
                         Text(safeToSpendStatusText)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.textSecondary)
+                        // A quiet, secondary caveat — see CLARITY_HOME_SPEC.md §5/§20: V1 is
+                        // budget-position only, so this must not imply forward-looking awareness
+                        // (upcoming bills) it doesn't have. Never the primary message; kept on the
+                        // same line as the status dot to stay out of the way visually.
+                        Text("· Based on this period's budget")
+                            .font(.caption2)
+                            .foregroundStyle(.textTertiary)
+                            .lineLimit(1)
                     }
-                    .padding(.top, ClaritySpacing.xs)
 
-                    // A quiet, secondary caveat — see CLARITY_HOME_SPEC.md §5/§20: V1 is
-                    // budget-position only, so the label must not imply forward-looking
-                    // awareness (upcoming bills) it doesn't have. Never the primary message.
-                    Text("Based on this period's budget")
-                        .font(.footnote)
-                        .foregroundStyle(.textTertiary)
+                    ClarityProgressBar(progress: safeToSpendProgress, color: safeToSpendColor)
+                        .padding(.top, 2)
+
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(summary.totalSpent.currencyFormattedSummary) spent")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.textPrimary)
+                            Text("\(spentPercentText) of \(summary.totalAvailable.currencyFormattedSummary)")
+                                .font(.caption2)
+                                .foregroundStyle(.textTertiary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text("\(summary.totalLeft.currencyFormattedSummary) left")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.textPrimary)
+                            Text("\(leftPercentText) remaining")
+                                .font(.caption2)
+                                .foregroundStyle(.textTertiary)
+                        }
+                    }
                 } else {
                     Text("Set a budget to see what's safe to spend")
                         .font(.subheadline)
                         .foregroundStyle(.textSecondary)
-                        .multilineTextAlignment(.center)
                         .padding(.top, ClaritySpacing.xs)
                 }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
-        .surface(.elevated, radius: ClarityRadius.extraLarge, padding: ClaritySpacing.xxxl)
+        .claritySurface(tint: .income, radius: ClarityRadius.large, padding: ClaritySpacing.md)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(safeToSpendAccessibilityLabel)
         .accessibilityHint("Double tap to view your budget")
@@ -217,6 +358,19 @@ struct HomeView: View {
         case .previousWeek: factor.isFavorable ? "\(percent) lower than last week" : "\(percent) higher than last week"
         case .typicalWeek: factor.isFavorable ? "\(percent) below your typical week" : "\(percent) above your typical week"
         case .monthOverMonth: factor.isFavorable ? "\(percent) lower than this point last month" : "\(percent) higher than this point last month"
+        }
+    }
+
+    /// Short (1-2 word) label for the compact factor strip beneath the score — the sentence-level
+    /// phrasing belongs to `clarityScoreFactorTitle`/`clarityScoreSummary` above; this exists only
+    /// so `clarityScoreFactorsStrip` can lay out a percent + label pair per factor without
+    /// truncating a full sentence.
+    private func clarityScoreFactorShortLabel(_ factor: ClarityScoreFactor) -> String {
+        switch factor.kind {
+        case .budgetPace: "budget pace"
+        case .previousWeek: "last week"
+        case .typicalWeek: "typical week"
+        case .monthOverMonth: "last month"
         }
     }
 
@@ -253,112 +407,103 @@ struct HomeView: View {
         guard let score = clarityScoreResult.score, clarityScoreHasSignal else {
             return "Clarity Score. \(clarityScoreSummary)"
         }
-        return "Clarity Score: \(score) out of 100. \(clarityScoreSummary)"
+        return "Clarity Score: \(score) out of 100, \(clarityScoreTierLabel ?? ""). \(clarityScoreSummary)"
+    }
+
+    /// A coarse, presentation-only reading of the 0-100 score — same "the view owns the wording,
+    /// not the calculator" split as `clarityScoreFactorTitle` above. Deliberately simple (3
+    /// buckets); this is a glance-level label, not a new scoring system.
+    private var clarityScoreTierLabel: String? {
+        guard let score = clarityScoreResult.score, clarityScoreHasSignal else { return nil }
+        switch score {
+        case 70...: return "Good"
+        case 40..<70: return "Fair"
+        default: return "Needs focus"
+        }
+    }
+
+    private var clarityScoreTierColor: Color {
+        guard let score = clarityScoreResult.score else { return .textSecondary }
+        switch score {
+        case 70...: return .income
+        case 40..<70: return .warning
+        default: return .expense
+        }
     }
 
     private var clarityScoreSection: some View {
-        // Same `.secondary` tier as What's Different — both are lightweight "why" surfaces one
-        // step down from Safe to Spend's `.elevated` hero. See CLARITY_HOME_VISUAL_SPEC.md §5.
-        SectionCard(tier: .secondary) {
-            VStack(alignment: .leading, spacing: ClaritySpacing.md) {
-                HStack {
-                    Text("Clarity Score")
-                        .font(.sectionTitle)
-                        .foregroundStyle(.textSecondary)
-                    Spacer()
-                    if let badge = clarityScoreTrendBadge {
-                        DeltaIndicator(delta: badge.delta, direction: badge.direction, isFavorable: badge.isFavorable)
-                    }
+        VStack(alignment: .leading, spacing: ClaritySpacing.md) {
+            HStack(spacing: ClaritySpacing.sm) {
+                ZStack {
+                    Circle().fill(Color.skyBlue.opacity(0.18))
+                    Image(systemName: "chart.bar.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.skyBlue)
                 }
+                .frame(width: 32, height: 32)
 
-                if let score = clarityScoreResult.score, clarityScoreHasSignal {
-                    Text("\(score)")
-                        .heroAmountStyle()
-                        .foregroundStyle(.textPrimary)
-                }
-
-                Text(clarityScoreSummary)
-                    .font(.subheadline)
+                Text("CLARITY SCORE")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(0.5)
                     .foregroundStyle(.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
 
-                if !clarityScoreResult.factors.isEmpty {
-                    VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
-                        ForEach(clarityScoreResult.factors) { factor in
-                            ClarityScoreFactorRow(factor: factor, title: clarityScoreFactorTitle(factor))
-                        }
-                    }
-                    .padding(.top, ClaritySpacing.xs)
+                Spacer()
+
+                if let badge = clarityScoreTrendBadge {
+                    DeltaIndicator(delta: badge.delta, direction: badge.direction, isFavorable: badge.isFavorable)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let score = clarityScoreResult.score, clarityScoreHasSignal {
+                HStack(alignment: .center, spacing: ClaritySpacing.sm) {
+                    Text("\(score)")
+                        .compactHeroAmountStyle()
+                        .foregroundStyle(.textPrimary)
+
+                    if let clarityScoreTierLabel {
+                        Text(clarityScoreTierLabel)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(clarityScoreTierColor)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(clarityScoreTierColor.opacity(0.16), in: Capsule())
+                    }
+                }
+            }
+
+            Text(clarityScoreSummary)
+                .font(.caption)
+                .foregroundStyle(.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !clarityScoreResult.factors.isEmpty {
+                Rectangle()
+                    .fill(Color.surfaceSecondary)
+                    .frame(height: 1)
+
+                HStack(alignment: .top, spacing: ClaritySpacing.md) {
+                    ForEach(clarityScoreResult.factors) { factor in
+                        VStack(alignment: .leading, spacing: 1) {
+                            DeltaIndicator(
+                                delta: factor.magnitudeFraction.formatted(.percent.precision(.fractionLength(0))),
+                                direction: factor.isFavorable ? .down : .up,
+                                isFavorable: factor.isFavorable
+                            )
+                            Text(clarityScoreFactorShortLabel(factor))
+                                .font(.caption2)
+                                .foregroundStyle(.textTertiary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(clarityScoreFactorTitle(factor))
+                    }
+                }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .claritySurface(tint: .skyBlue, padding: ClaritySpacing.md)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(clarityScoreAccessibilityLabel)
-    }
-
-    // MARK: - Ask Clarity entry
-
-    /// 1-2 example questions drawn from data Home already computes (`whatsDifferentInsights`/
-    /// `summary`) — a light contextual touch, not a new calculation. Falls back to a generally
-    /// useful example when there's nothing more specific to point at yet.
-    private var askClarityHints: [String] {
-        var hints: [String] = []
-        if let topInsight = whatsDifferentInsights.first, !topInsight.subject.isEmpty {
-            hints.append("How much did I spend on \(topInsight.subject)?")
-        }
-        if hasBudgetData, summary.totalSpent > summary.totalAvailable {
-            hints.append("Am I within my budget?")
-        } else if hints.isEmpty {
-            hints.append("Where am I spending the most?")
-        }
-        return Array(hints.prefix(2))
-    }
-
-    /// Home's primary entry point into Ask Clarity — placed right after Clarity Score so the
-    /// flow reads "financial status → ask about it." A compact, input-styled card (never a
-    /// floating button), whole-card-tappable to open the existing conversation screen; never
-    /// duplicates that screen's own chat UI here. More → Ask Clarity remains a secondary way in.
-    private var askClaritySection: some View {
-        NavigationLink {
-            AskClarityView()
-        } label: {
-            VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
-                HStack(spacing: ClaritySpacing.sm) {
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(LinearGradient.emeraldSky)
-                    Text("Ask anything about your finances")
-                        .font(.subheadline)
-                        .foregroundStyle(.textSecondary)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.textTertiary)
-                }
-
-                if !askClarityHints.isEmpty {
-                    HStack(spacing: ClaritySpacing.xs) {
-                        ForEach(askClarityHints, id: \.self) { hint in
-                            Text(hint)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.textSecondary)
-                                .lineLimit(1)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Color.surfaceElevated, in: Capsule())
-                        }
-                    }
-                }
-            }
-            .padding(ClaritySpacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.surfaceSecondary, in: RoundedRectangle(cornerRadius: ClarityRadius.large))
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Ask Clarity. Ask anything about your finances.")
-        .accessibilityHint("Double tap to start a conversation")
     }
 
     // MARK: - What's Different?
@@ -373,34 +518,73 @@ struct HomeView: View {
     @ViewBuilder
     private var whatsDifferentSection: some View {
         if !allEntries.isEmpty {
-            // `.secondary` tier — a lightweight attention surface, one step down from Safe to
-            // Spend's `.elevated` hero and distinct from Net Worth's `.primary` compact card. See
-            // CLARITY_HOME_VISUAL_SPEC.md §5.
-            SectionCard(tier: .secondary) {
-                VStack(alignment: .leading, spacing: ClaritySpacing.md) {
-                    Text("What's Different?")
-                        .font(.sectionTitle)
+            VStack(alignment: .leading, spacing: ClaritySpacing.md) {
+                HStack(spacing: ClaritySpacing.sm) {
+                    ZStack {
+                        Circle().fill(Color.indigo.opacity(0.18))
+                        Image(systemName: "questionmark.circle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.indigo)
+                    }
+                    .frame(width: 32, height: 32)
+
+                    Text("WHAT'S DIFFERENT?")
+                        .font(.caption2.weight(.semibold))
+                        .tracking(0.5)
                         .foregroundStyle(.textSecondary)
 
-                    if whatsDifferentInsights.isEmpty {
-                        Text("Nothing stands out this period")
-                            .font(.subheadline)
-                            .foregroundStyle(.textTertiary)
-                    } else {
-                        VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
-                            ForEach(whatsDifferentInsights) { insight in
-                                Button {
-                                    handleInsightTap(insight.kind)
-                                } label: {
-                                    WhatsDifferentRow(insight: insight)
-                                }
-                                .buttonStyle(.plain)
+                    Spacer()
+
+                    if !whatsDifferentInsights.isEmpty {
+                        NavigationLink {
+                            // `InsightsView`'s own body is a bare `VStack` — it expects to sit
+                            // inside a scrolling container, matching every other pushed detail
+                            // screen in the app (e.g. `GoalDetailView`). Pushing it bare here
+                            // previously froze the screen: `.darkScreenBackground()`'s
+                            // `.ignoresSafeArea()` + fixed frame with no `ScrollView` above it
+                            // left content stuck with no way to reach what scrolled off-screen.
+                            ScrollView {
+                                InsightsView(month: month)
                             }
+                            .darkScreenBackground()
+                            .navigationTitle("Insights")
+                        } label: {
+                            HStack(spacing: 2) {
+                                Text("See all")
+                                Image(systemName: "chevron.right")
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.emerald)
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if whatsDifferentInsights.isEmpty {
+                    Text("Nothing stands out this period")
+                        .font(.subheadline)
+                        .foregroundStyle(.textTertiary)
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(whatsDifferentInsights.enumerated()), id: \.element.id) { index, insight in
+                            if index > 0 {
+                                Rectangle()
+                                    .fill(Color.surfaceSecondary)
+                                    .frame(height: 1)
+                                    .padding(.leading, 44)
+                            }
+                            Button {
+                                handleInsightTap(insight.kind)
+                            } label: {
+                                WhatsDifferentRow(insight: insight)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.vertical, ClaritySpacing.xs)
+                        }
+                    }
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .claritySurface(tint: .indigo, padding: ClaritySpacing.md)
         }
     }
 
@@ -412,8 +596,8 @@ struct HomeView: View {
             // Same `.secondary` lightweight-surface tier as What's Different — both occupy the
             // SECONDARY hierarchy tier per CLARITY_HOME_SPEC.md §2 and should share one visual
             // weight. See CLARITY_HOME_VISUAL_SPEC.md §6.
-            SectionCard(tier: .secondary) {
-                VStack(alignment: .leading, spacing: ClaritySpacing.md) {
+            SectionCard(tier: .secondary, padding: ClaritySpacing.lg) {
+                VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
                     Text("Upcoming")
                         .font(.sectionTitle)
                         .foregroundStyle(.textSecondary)
@@ -442,108 +626,123 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Net Worth
-
-    @ViewBuilder
-    private var netWorthSection: some View {
-        if !activeWallets.isEmpty {
-            Button {
-                selectedTab = .wallets
-            } label: {
-                // `.primary` tier (the default, dimmest surface) with tighter `lg` padding — a
-                // compact card, one step down from What's Different/Upcoming's `.secondary`
-                // tier and well below Safe to Spend's `.elevated` hero. See
-                // CLARITY_HOME_VISUAL_SPEC.md §8.
-                SectionCard(padding: ClaritySpacing.lg) {
-                    VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
-                        Text("Net Worth")
-                            .font(.sectionTitle)
-                            .foregroundStyle(.textSecondary)
-                        Text(netWorth.currencyFormattedSummary)
-                            .heroAmountStyle()
-                            .foregroundStyle(netWorth < 0 ? Color.expense : Color.textPrimary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Net worth: \(netWorth.currencyFormattedSummary)")
-        }
-    }
 
 }
 
 // MARK: - Row subviews
 
-private struct ClarityScoreFactorRow: View {
-    let factor: ClarityScoreFactor
-    let title: String
-
-    private var percentText: String {
-        factor.magnitudeFraction.formatted(.percent.precision(.fractionLength(0)))
-    }
+/// The linear budget-progress track shown inside Safe to Spend — a thin, flat capsule (no
+/// shadow/glow, matching `CLARITY_DESIGN_SYSTEM.md` §10's "no `.shadow(...)` calls" rule).
+/// Presentation-only: takes an already-clamped `0...1` fraction and a color the caller derives
+/// from `GaugeThreshold`, so it can never disagree with the status dot/text next to it.
+private struct ClarityProgressBar: View {
+    let progress: Double
+    let color: Color
 
     var body: some View {
-        HStack(alignment: .top, spacing: ClaritySpacing.sm) {
-            DeltaIndicator(
-                delta: percentText,
-                direction: factor.isFavorable ? .down : .up,
-                isFavorable: factor.isFavorable
-            )
-            Text(title)
-                .font(.footnote)
-                .foregroundStyle(.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.surfaceElevated)
+                Capsule().fill(color)
+                    .frame(width: geometry.size.width * progress)
+            }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(title)
+        .frame(height: 8)
     }
 }
 
 private struct WhatsDifferentRow: View {
     let insight: WhatsDifferentInsight
 
-    private var deltaText: String {
-        if let magnitude = insight.magnitudeFraction {
-            return magnitude.formatted(.percent.precision(.fractionLength(0)))
-        }
+    /// Falls back to `.info` (the shared "neutral highlight" token) for `.incomeChange`/
+    /// `.overPace`, which aren't tied to a single category and so have no category color.
+    private var color: Color {
+        insight.headCategory.map { Color(hex: $0.colorHex) } ?? .info
+    }
+
+    private var iconName: String {
+        insight.headCategory?.icon ?? (insight.kind == .incomeChange ? "banknote.fill" : "gauge.with.needle.fill")
+    }
+
+    private var title: String {
+        insight.subject.isEmpty ? "Budget pace" : insight.subject
+    }
+
+    private var statusText: String {
         switch insight.kind {
-        case .overPace: return "Ahead of pace"
-        case .overPlan: return "Over plan"
-        case .categoryChange, .incomeChange: return ""
+        case .categoryChange, .incomeChange:
+            return insight.direction == .up ? "Higher than last month" : "Lower than last month"
+        case .overPlan:
+            return "Over plan"
+        case .overPace:
+            return "You're on pace to exceed this period's budget"
         }
     }
 
-    private var message: String {
-        switch insight.kind {
-        case .categoryChange:
-            let comparison = insight.direction == .up ? "higher" : "lower"
-            return "\(insight.subject) is \(deltaText) \(comparison) than last month"
-        case .incomeChange:
-            let comparison = insight.direction == .up ? "higher" : "lower"
-            return "Income is \(deltaText) \(comparison) than last month"
-        case .overPace:
-            return "You're on pace to exceed this period's budget"
-        case .overPlan:
-            return "\(insight.subject) is over its planned budget this period"
-        }
+    private var amountText: String? {
+        guard let amount = insight.amountDifference else { return nil }
+        return "\(amount >= 0 ? "+" : "-")\(abs(amount).currencyFormattedSummary)"
+    }
+
+    private var percentText: String? {
+        insight.magnitudeFraction.map { $0.formatted(.percent.precision(.fractionLength(0))) }
+    }
+
+    private var accessibilityLabel: String {
+        [title, statusText, amountText, percentText]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: ClaritySpacing.sm) {
-            DeltaIndicator(
-                delta: deltaText,
-                direction: insight.direction == .up ? .up : .down,
-                isFavorable: insight.isFavorable
-            )
-            Text(message)
-                .font(.body)
-                .foregroundStyle(.textPrimary)
-                .fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: ClaritySpacing.md) {
+            ZStack {
+                Circle().fill(color.opacity(0.18))
+                Image(systemName: iconName)
+                    .foregroundStyle(color)
+                    .font(.caption)
+            }
+            .frame(width: 32, height: 32)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.textPrimary)
+                    .lineLimit(1)
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.textTertiary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: ClaritySpacing.sm)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                if let amountText {
+                    Text(amountText)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(insight.isFavorable == true ? Color.income : Color.expense)
+                }
+                if let percentText {
+                    DeltaIndicator(
+                        delta: percentText,
+                        direction: insight.direction == .up ? .up : .down,
+                        isFavorable: insight.isFavorable
+                    )
+                } else if insight.kind == .overPace {
+                    Text("Ahead of pace")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.warning)
+                }
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.textTertiary)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(message)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 

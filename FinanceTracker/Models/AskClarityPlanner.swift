@@ -28,20 +28,26 @@ struct AskClarityPlan {
     let ranking: AskClarityPlanRanking?
     /// Only set for `.budgetState` — which state was asked about ("over budget," "within
     /// budget," ...). `subjects.first?.singleCategory` (when present) scopes it to one category;
-    /// otherwise it's a global "which categories are X" question.
+    /// otherwise `budgetScope` decides whether it's a global totals check or a per-category list.
     let budgetState: AskClarityBudgetStateQuery?
+    /// Only set for `.budgetState` when no single category was named — distinguishes "Am I within
+    /// my budget?" (`.overall`, total spending vs. total applicable budget) from "Which categories
+    /// are over budget?" (`.perCategory`, a filtered list of individual categories). `nil` whenever
+    /// a single category *was* named, since `budgetState`/`subjects.first?.singleCategory` alone
+    /// already fully describe that case. See `AskClarityPlanner.plan`, step 3.
+    let budgetScope: AskClarityBudgetScope?
     /// Only set for `.trend` — how many consecutive equivalent periods to compute, oldest to
     /// newest. `nil` lets `AskClarityExecutor` apply its own default span.
     let trendSpan: Int?
 
     /// A `let` stored property with an inline default value is excluded from Swift's synthesized
     /// memberwise initializer entirely (it can never be overridden, not merely defaulted) — so
-    /// `budgetState`/`trendSpan` need this explicit initializer to stay optional at every other
-    /// call site while still being settable at the two that need them.
+    /// `budgetState`/`budgetScope`/`trendSpan` need this explicit initializer to stay optional at
+    /// every other call site while still being settable at the ones that need them.
     init(
         operation: AskClarityPlanOperation, metric: AskClarityMetric, subjects: [AskClaritySubject], period: AskClarityPeriod,
         comparison: AskClarityPlanComparison?, ranking: AskClarityPlanRanking?,
-        budgetState: AskClarityBudgetStateQuery? = nil, trendSpan: Int? = nil
+        budgetState: AskClarityBudgetStateQuery? = nil, budgetScope: AskClarityBudgetScope? = nil, trendSpan: Int? = nil
     ) {
         self.operation = operation
         self.metric = metric
@@ -50,8 +56,17 @@ struct AskClarityPlan {
         self.comparison = comparison
         self.ranking = ranking
         self.budgetState = budgetState
+        self.budgetScope = budgetScope
         self.trendSpan = trendSpan
     }
+}
+
+/// Which shape a categoryless budget-state question asked for — see `AskClarityPlan.budgetScope`.
+enum AskClarityBudgetScope: Equatable {
+    /// "Am I within my budget?" — one overall verdict, total spending vs. total applicable budget.
+    case overall
+    /// "Which categories are over budget?" — a filtered list of individual categories.
+    case perCategory
 }
 
 enum AskClarityPlanOperation: Equatable {
@@ -70,6 +85,9 @@ enum AskClarityPlanOperation: Equatable {
     case categoryBreakdown
     /// The same metric/subject computed across several consecutive equivalent periods.
     case trend
+    /// "Which day did I spend the most on restaurants?" — spending bucketed by calendar day within
+    /// the period, optionally scoped to one category/head-category subject, ranked highest/lowest.
+    case rankDays
 }
 
 enum AskClarityPlanComparison: Equatable {
@@ -149,12 +167,33 @@ enum AskClarityPlanner {
         }()
         let resolvedSubject = query.categoryMatch.flatMap(subject(for:))
 
-        // 3. Budget-state questions ("which categories are over budget," "is Restaurants over
-        //    budget"). Only a single, specifically-named category counts here (`resolvedCategory`,
-        //    never an aggregate) — matches every other budget-state-shaped concept in this file.
+        // 3. Budget-state questions ("Am I within my budget?", "which categories are over
+        //    budget," "is Restaurants over budget"). A single, specifically-named category
+        //    (`resolvedCategory`, never an aggregate) always scopes to that one category.
+        //    Otherwise, `query.wantsList` (set from "categories"/"expenses" appearing in the
+        //    question — the same signal `.rankCategories`/`.categoryBreakdown` already use to
+        //    tell a plural, listy phrasing from a singular one) distinguishes "Am I within my
+        //    budget?" (`.overall` — one verdict, total spending vs. total applicable budget) from
+        //    "Which categories are over budget?" (`.perCategory` — a filtered list). Without this
+        //    distinction both phrasings planned identically, so "Am I within my budget?" could
+        //    answer with a per-category list even when every individual category happened to be
+        //    over/near its own limit while overall spending was still fine.
         if let budgetState = query.budgetState {
             let subjects: [AskClaritySubject] = resolvedCategory.map { [AskClaritySubject(name: $0.name, categories: [$0], singleCategory: $0)] } ?? []
-            return .plan(AskClarityPlan(operation: .budgetState, metric: .spending, subjects: subjects, period: period, comparison: nil, ranking: nil, budgetState: budgetState))
+            let scope: AskClarityBudgetScope? = resolvedCategory == nil ? (query.wantsList ? .perCategory : .overall) : nil
+            return .plan(AskClarityPlan(operation: .budgetState, metric: .spending, subjects: subjects, period: period, comparison: nil, ranking: nil, budgetState: budgetState, budgetScope: scope))
+        }
+
+        // 3b. "Which day did I spend the most/least [on X]?" — a day-level ranking, checked before
+        //     plain category/transaction ranking since a day question can also contain a ranking
+        //     word ("most") that would otherwise misroute it to step 4 below.
+        if query.wantsDayRanking {
+            let subjects: [AskClaritySubject] = resolvedSubject.map { [$0] } ?? []
+            let direction = query.ranking ?? .highest
+            return .plan(AskClarityPlan(
+                operation: .rankDays, metric: .spending, subjects: subjects, period: period,
+                comparison: nil, ranking: AskClarityPlanRanking(direction: direction, wantsList: query.wantsList)
+            ))
         }
 
         // 4. Ranking questions. Plain category/transaction ranking is planned; ranking *by

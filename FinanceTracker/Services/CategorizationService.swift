@@ -1,6 +1,84 @@
 import Foundation
 import SwiftData
 
+/// The pieces of an expense spoken in a short, natural phrase such as
+/// "20 euros on taxi" or "5 euros en Mercadona". This is deliberately a
+/// small, offline parser: speech recognition turns audio into text and this
+/// type makes the common logging phrases useful without an API key.
+struct ParsedVoiceExpense: Equatable {
+    let amount: Decimal
+    let note: String
+    /// A semantic category family, not a made-up user category name.
+    let categoryHint: VoiceExpenseCategoryHint?
+}
+
+enum VoiceExpenseCategoryHint: String, Equatable {
+    case groceries
+    case transport
+}
+
+enum VoiceExpenseParser {
+    /// Parses a spoken expense. Amounts may use either a comma or dot decimal
+    /// separator, which matters for Spanish speech recognition output.
+    static func parse(_ text: String) -> ParsedVoiceExpense? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let pattern = #"^\s*(\d+(?:[,.]\d{1,2})?)\s*(?:€|euros?|eur|dollars?|\$)?\s*(?:on|for|at|in|en|para|por|a)?\s*(.*)$"#
+        guard
+            let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+            let match = expression.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)),
+            let amountRange = Range(match.range(at: 1), in: trimmed),
+            let amount = Decimal(string: String(trimmed[amountRange]).replacingOccurrences(of: ",", with: ".")),
+            amount > 0
+        else { return nil }
+
+        let noteRange = Range(match.range(at: 2), in: trimmed)
+        let note = noteRange.map { String(trimmed[$0]) }
+            .map(cleanNote)
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? "Expense"
+
+        return ParsedVoiceExpense(amount: amount, note: note, categoryHint: categoryHint(for: note))
+    }
+
+    /// Finds the user's own matching category for a known merchant/type. The
+    /// app never creates categories from voice input; a user can always adjust
+    /// the suggestion in the normal transaction form before saving.
+    static func categoryMatch(for hint: VoiceExpenseCategoryHint?, in categories: [Category]) -> Category? {
+        guard let hint else { return nil }
+        let names: [String]
+        switch hint {
+        case .groceries:
+            names = ["groceries", "grocery", "supermarket", "food", "alimentacion", "alimentación", "comida"]
+        case .transport:
+            names = ["transport", "transportation", "travel", "taxi", "car", "coche", "transporte", "viajes"]
+        }
+        return categories.first { category in
+            let name = category.name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).lowercased()
+            return names.contains { name.contains($0) || $0.contains(name) }
+        }
+    }
+
+    private static func cleanNote(_ rawNote: String) -> String {
+        rawNote
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    private static func categoryHint(for note: String) -> VoiceExpenseCategoryHint? {
+        let normalized = note.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).lowercased()
+        let words = Set(normalized.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
+        if !words.isDisjoint(with: ["mercadona", "supermercado", "supermarket", "grocery", "groceries", "lidl", "aldi", "carrefour", "dia"]) {
+            return .groceries
+        }
+        if !words.isDisjoint(with: ["taxi", "uber", "cab", "bolt", "metro", "bus", "tren", "train"]) {
+            return .transport
+        }
+        return nil
+    }
+}
+
 /// Suggests a Category for a transaction note/merchant string — first with a deterministic,
 /// offline name match against the user's real categories (`localCategoryMatch`), falling back to
 /// asking the Claude API to pick the best match only when that finds nothing. Best-effort UX

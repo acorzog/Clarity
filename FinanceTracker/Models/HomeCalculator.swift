@@ -35,10 +35,18 @@ struct WhatsDifferentInsight: Identifiable {
     /// The subject of the observation — a head category name, or "Income" for the income
     /// insight. Empty for `.overPace`, which has no single subject.
     let subject: String
+    /// The category this observation is about, for display (icon/color) only — `nil` for
+    /// `.incomeChange`/`.overPace`, which aren't tied to a single category.
+    let headCategory: HeadCategory?
     let direction: InsightDirection
-    /// Fractional change vs. the prior period, e.g. `0.18` for +18%. `nil` for insights that
-    /// aren't percentage-based (`.overPace`, `.overPlan`).
+    /// Fractional change vs. the comparison this insight is based on — the prior month for
+    /// `.categoryChange`/`.incomeChange`, the plan for `.overPlan`. `nil` for `.overPace`, which
+    /// has no single subject to compute a fraction against.
     let magnitudeFraction: Double?
+    /// Absolute currency difference vs. that same comparison (prior month's actual, or planned
+    /// amount) — both already computed by `periodSpendingSummary`, just threaded through here
+    /// rather than recalculated. `nil` for `.incomeChange`/`.overPace`.
+    let amountDifference: Decimal?
     let severity: InsightSeverity
     /// Whether this change is good news, bad news, or neither — decided here (an expense
     /// category rising is unfavorable; income rising is favorable), not inferred by the view
@@ -120,8 +128,10 @@ enum HomeCalculator {
                         id: "category-\(currentHead.headCategory.persistentModelID)",
                         kind: .categoryChange,
                         subject: currentHead.headCategory.name,
+                        headCategory: currentHead.headCategory,
                         direction: fraction > 0 ? .up : .down,
                         magnitudeFraction: abs(fraction),
+                        amountDifference: currentHead.actual - previousHead.actual,
                         severity: .informational,
                         isFavorable: fraction > 0 ? false : true
                     ))
@@ -133,8 +143,10 @@ enum HomeCalculator {
                     id: "overplan-\(currentHead.headCategory.persistentModelID)",
                     kind: .overPlan,
                     subject: currentHead.headCategory.name,
+                    headCategory: currentHead.headCategory,
                     direction: .up,
-                    magnitudeFraction: nil,
+                    magnitudeFraction: (-currentHead.remaining / currentHead.planned).doubleValue,
+                    amountDifference: -currentHead.remaining,
                     severity: .warning,
                     isFavorable: false
                 ))
@@ -148,8 +160,10 @@ enum HomeCalculator {
                     id: "income",
                     kind: .incomeChange,
                     subject: "Income",
+                    headCategory: nil,
                     direction: fraction > 0 ? .up : .down,
                     magnitudeFraction: abs(fraction),
+                    amountDifference: nil,
                     severity: .informational,
                     isFavorable: fraction > 0 ? true : false
                 ))
@@ -166,8 +180,10 @@ enum HomeCalculator {
                     id: "pace",
                     kind: .overPace,
                     subject: "",
+                    headCategory: nil,
                     direction: .up,
                     magnitudeFraction: nil,
+                    amountDifference: nil,
                     severity: .caution,
                     isFavorable: false
                 ))
@@ -209,5 +225,22 @@ enum HomeCalculator {
             .map { UpcomingSharedBalance(event: $0) }
             .filter { $0.amount != 0 }
             .sorted { abs($0.amount) > abs($1.amount) }
+    }
+
+    /// `totalLeft` divided evenly across the days remaining (today included) until `periodEnd` —
+    /// Home's "≈ X per day" chip. `periodEnd` is exclusive, matching `PeriodSpendingSummary.
+    /// period` (a `DateInterval`) and `periodRangeText`'s own handling of it elsewhere, so the day
+    /// count already comes out correct whether the period is a plain calendar month (28/29/30/31
+    /// days) or a custom budget cycle. `nil` when there's nothing meaningful to show — the period
+    /// has already ended, or there's nothing left to spend.
+    static func averageDailyAllowance(
+        totalLeft: Decimal, periodEnd: Date, today: Date = .now, calendar: Calendar = .current
+    ) -> Decimal? {
+        guard totalLeft > 0 else { return nil }
+        let daysRemaining = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: today), to: calendar.startOfDay(for: periodEnd)
+        ).day ?? 0
+        guard daysRemaining > 0 else { return nil }
+        return totalLeft / Decimal(daysRemaining)
     }
 }

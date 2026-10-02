@@ -171,6 +171,7 @@ struct RemainingView: View {
                 RemainingGauge(
                     totalAvailable: summary.totalAvailable,
                     totalSpent: summary.totalSpent,
+                    totalBudgeted: summary.totalBudgeted,
                     breakdown: headCategories.compactMap { headSummary(for: $0, in: summary) }
                 )
                 .padding(.bottom, -60)
@@ -435,6 +436,11 @@ private struct HeadRemainingSummary: Identifiable {
 private struct RemainingGauge: View {
     let totalAvailable: Decimal
     let totalSpent: Decimal
+    /// The sum of every expense category's *planned* amount (`PeriodSpendingSummary.
+    /// totalBudgeted`) — distinct from `totalAvailable` (planned + any manual/unplanned
+    /// adjustments); compared against `totalSpent` for the small "over/under plan" line under the
+    /// center amount.
+    let totalBudgeted: Decimal
     let breakdown: [HeadRemainingSummary]
 
     private let gaugeSize: CGFloat = 230
@@ -446,6 +452,23 @@ private struct RemainingGauge: View {
     }
 
     private var totalLeft: Decimal { totalAvailable - totalSpent }
+
+    /// Positive = spent more than planned; negative = under plan. Compared against
+    /// `totalBudgeted`, not `totalAvailable` — the two only differ when unplanned/manual spending
+    /// is involved, and this line is specifically about the *plan*, not what's left to spend.
+    private var overUnderPlan: Decimal { totalSpent - totalBudgeted }
+
+    private var overUnderPlanLabel: String {
+        if overUnderPlan == 0 { return "On plan" }
+        let magnitude = abs(overUnderPlan).currencyFormatted
+        return overUnderPlan > 0 ? "\(magnitude) over plan" : "\(magnitude) under plan"
+    }
+
+    private var overUnderPlanColor: Color {
+        if overUnderPlan > 0 { return .expenseRed }
+        if overUnderPlan < 0 { return .emerald }
+        return .white.opacity(0.5)
+    }
 
     private var arcColor: Color {
         guard totalAvailable > 0 else { return .white.opacity(0.3) }
@@ -481,6 +504,13 @@ private struct RemainingGauge: View {
                     .foregroundStyle(.white)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
+                if totalBudgeted > 0 {
+                    Text(overUnderPlanLabel)
+                        .font(.caption2)
+                        .foregroundStyle(overUnderPlanColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
             .frame(width: gaugeSize * 0.55)
         }
@@ -517,13 +547,15 @@ private struct HeadArcLabel: View {
                 .foregroundStyle(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
+                .minimumScaleFactor(0.75)
+                .frame(width: 70)
             Text(head.left.currencyFormatted)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(Color(hex: head.colorHex))
                 .lineLimit(1)
                 .fixedSize()
         }
-        .frame(width: 64)
+        .frame(width: 70)
     }
 }
 

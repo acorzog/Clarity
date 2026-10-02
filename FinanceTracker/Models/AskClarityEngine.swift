@@ -63,6 +63,28 @@ enum AskClarityRangeCalculator {
             .sorted { $0.amount > $1.amount }
     }
 
+    /// Per-calendar-day expense totals for a raw date range — the day-level analog of
+    /// `categoryTotals`, optionally scoped to `categories` (a single category, or a head
+    /// category's full child list for an aggregate subject; `nil` means every category). Days with
+    /// no eligible spending simply don't appear — never a zero row — sorted highest-spend-first.
+    static func dailyTotals(from start: Date, to end: Date, entries: [Entry], categories: [Category]? = nil, calendar: Calendar) -> [(day: Date, amount: Decimal)] {
+        let categoryIDs = categories.map { Set($0.map(ObjectIdentifier.init)) }
+        let eligible = entries
+            .filter { $0.date >= start && $0.date < end && $0.type == .expense }
+            .budgetEligible
+            .filter { entry in
+                guard let categoryIDs else { return true }
+                guard let category = entry.category else { return false }
+                return categoryIDs.contains(ObjectIdentifier(category))
+            }
+        var sums: [Date: Decimal] = [:]
+        for entry in eligible {
+            let day = calendar.startOfDay(for: entry.date)
+            sums[day, default: 0] += entry.amount
+        }
+        return sums.map { (day: $0.key, amount: $0.value) }.sorted { $0.amount > $1.amount }
+    }
+
     /// The single largest (or smallest) budget-eligible expense entry in the range.
     static func topExpense(from start: Date, to end: Date, entries: [Entry], smallest: Bool = false) -> Entry? {
         let eligible = entries.filter { $0.date >= start && $0.date < end && $0.type == .expense }.budgetEligible
@@ -276,6 +298,8 @@ enum AskClarityEngine {
             return respondToCategoryBreakdown(plan: plan, execution: execution, context: context)
         case .trend:
             return respondToTrend(plan: plan, execution: execution, context: context)
+        case .rankDays:
+            return respondToDayRanking(plan: plan, execution: execution, context: context)
         }
     }
 
@@ -352,6 +376,9 @@ enum AskClarityEngine {
     // MARK: - Respond (budget state)
 
     private static func respondToBudgetState(plan: AskClarityPlan, execution: AskClarityExecutionResult, context: AskClaritySessionContext) -> Result {
+        if case .overallBudgetState(let summary) = execution {
+            return respondToOverallBudgetState(summary: summary, period: plan.period, context: context)
+        }
         guard case .budgetState(let categoryRow, let health) = execution else {
             return Result(
                 answer: AskClarityAnswer(headline: "Budget status is tracked monthly — I can check this month or last month, not \(plan.period.label).", hasSufficientData: false),
@@ -412,6 +439,47 @@ enum AskClarityEngine {
             : "\(matches.map(\.category.name).joined(separator: ", ")) are \(stateDescription(target)) \(plan.period.label)."
         let detail = matches.map { "\($0.category.name): \($0.spent.currencyFormatted) of \($0.budgeted.currencyFormatted)" }.joined(separator: "; ")
         return Result(answer: AskClarityAnswer(headline: headline, supportingDetail: detail, hasSufficientData: true), updatedContext: context)
+    }
+
+    /// "Am I within my budget?" — the categoryless, `.overall`-scoped budget-state question.
+    /// Answers about the *whole* period (total spending vs. `summary.totalAvailable`, the exact
+    /// figure Home's Safe-to-Spend/`RemainingView`'s gauge already use — see `BudgetCalculator.
+    /// periodSpendingSummary`'s doc comment), never by filtering individual categories the way
+    /// "which categories are over budget?" does (`respondToBudgetState`'s no-single-category
+    /// branch below) — those two questions ask fundamentally different things and must not share
+    /// an answer, even though both used to plan identically before `AskClarityPlan.budgetScope`.
+    private static func respondToOverallBudgetState(summary: PeriodSpendingSummary, period: AskClarityPeriod, context: AskClaritySessionContext) -> Result {
+        guard summary.totalAvailable > 0 else {
+            return Result(
+                answer: AskClarityAnswer(headline: "You haven't budgeted anything yet, so there's nothing to compare your spending against.", hasSufficientData: false),
+                updatedContext: context
+            )
+        }
+
+        let progress = (summary.totalSpent / summary.totalAvailable).doubleValue
+        let state = BudgetHealthState.forProgress(progress)
+        let spent = summary.totalSpent.currencyFormatted
+        let available = summary.totalAvailable.currencyFormatted
+
+        let headline: String
+        let detail: String
+        switch state {
+        case .onTrack:
+            headline = "You're within budget \(period.label)."
+            detail = "You've spent \(spent) of \(available). \(summary.totalLeft.currencyFormatted) remaining."
+        case .approachingLimit:
+            headline = "You're close to your budget \(period.label)."
+            detail = "You've spent \(spent) of \(available). \(summary.totalLeft.currencyFormatted) remaining."
+        case .overBudget:
+            headline = "You're over budget \(period.label)."
+            detail = "You've spent \(spent) of \(available). \((summary.totalSpent - summary.totalAvailable).currencyFormatted) over budget."
+        }
+
+        let followUps = ["Which categories are over budget?", "Where am I spending the most?"]
+        return Result(
+            answer: AskClarityAnswer(headline: headline, supportingDetail: detail, hasSufficientData: true, followUpSuggestions: followUps, comparisonIsFavorable: state != .overBudget),
+            updatedContext: context
+        )
     }
 
     private static func targetState(for budgetState: AskClarityBudgetStateQuery) -> BudgetHealthState {
@@ -551,6 +619,35 @@ enum AskClarityEngine {
         let updated = top.category.map { updatedContext(from: context, category: $0, metric: .spending, period: plan.period) } ?? context
         let followUps = top.category.map { ["How much did I spend on \($0.name)?"] } ?? []
         return Result(answer: AskClarityAnswer(headline: headline, hasSufficientData: true, followUpSuggestions: followUps), updatedContext: updated)
+    }
+
+    // MARK: - Respond (day ranking)
+
+    private static func respondToDayRanking(plan: AskClarityPlan, execution: AskClarityExecutionResult, context: AskClaritySessionContext) -> Result {
+        guard case .dayRanking(let rows) = execution, !rows.isEmpty, let ranking = plan.ranking else {
+            return Result(answer: AskClarityAnswer(headline: "No spending logged \(plan.period.label) to break down by day.", hasSufficientData: false), updatedContext: context)
+        }
+        let ordered = ranking.direction == .highest ? rows : rows.reversed()
+        let subjectPhrase = plan.subjects.first.map { " on \($0.name)" } ?? ""
+
+        if ranking.wantsList {
+            let top = Array(ordered.prefix(3))
+            let headline = "Your \(ranking.direction == .highest ? "highest" : "lowest")-spending days\(subjectPhrase) \(plan.period.label):"
+            let detail = top.enumerated().map { "\($0.offset + 1). \(dayLabel($0.element.day)) — \($0.element.amount.currencyFormatted)" }.joined(separator: "\n")
+            return Result(answer: AskClarityAnswer(headline: headline, supportingDetail: detail, hasSufficientData: true), updatedContext: context)
+        }
+
+        guard let winner = ordered.first else {
+            return Result(answer: AskClarityAnswer(headline: "No spending logged \(plan.period.label) to break down by day.", hasSufficientData: false), updatedContext: context)
+        }
+        let headline = "You spent the \(ranking.direction == .highest ? "most" : "least")\(subjectPhrase) on \(dayLabel(winner.day)) — \(winner.amount.currencyFormatted)."
+        let followUps: [String] = plan.subjects.first.map { ["Is \($0.name) over budget?", "How much was \($0.name) last month?"] }
+            ?? ["Where am I spending the most?", "Am I within my budget?"]
+        return Result(answer: AskClarityAnswer(headline: headline, hasSufficientData: true, followUpSuggestions: followUps), updatedContext: context)
+    }
+
+    private static func dayLabel(_ day: Date) -> String {
+        day.formatted(.dateTime.weekday(.wide).month(.wide).day())
     }
 
     private static func unknownAnswer() -> AskClarityAnswer {

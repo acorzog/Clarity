@@ -74,6 +74,8 @@ struct MainTabView: View {
             }
         }
         .tint(.emerald)
+        .toolbarBackground(.ultraThinMaterial, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .preferredColorScheme(.dark)
         // The system posts this at midnight (and on timezone/manual date changes) while the app
         // is actually running — the common case, since the day usually rolls over overnight while
