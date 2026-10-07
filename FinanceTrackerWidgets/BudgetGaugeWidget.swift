@@ -39,7 +39,13 @@ struct BudgetGaugeProvider: TimelineProvider {
 private enum BudgetGaugeDataSource {
     static func currentEntry() -> BudgetGaugeEntry {
         let month = Date.startOfMonth()
-        let context = ModelContext(SharedModelContainer.make())
+
+        guard
+            let container = try? SharedModelContainer.make()
+        else {
+            return BudgetGaugeEntry(date: .now, available: 0, spent: 0)
+        }
+        let context = ModelContext(container)
 
         guard
             let budgets = try? context.fetch(FetchDescriptor<Budget>()),

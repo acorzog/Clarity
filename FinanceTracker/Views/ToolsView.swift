@@ -13,6 +13,21 @@ private struct ToolItem: Identifiable {
 /// it's an internal identifier, not user-facing — to avoid an unrelated rename.
 struct ToolsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.signOutAction) private var signOutAction
+
+    @State private var showingSignOutConfirmation = false
+    @State private var isSigningOut = false
+    @State private var signOutErrorMessage: String?
+
+    #if DEBUG
+    /// Phase 2C: the one place `SupabaseTestView` (sign-in smoke test + the manual Supabase
+    /// reference-data sync trigger) is actually reachable from — it previously existed only as
+    /// dead code nested in `RootView` with nothing presenting it. `#if DEBUG` is the only
+    /// dev-only compile condition this project already defines (shared by both the FinanceTracker
+    /// and FinanceTrackerDev targets' Debug configurations) — there's no narrower
+    /// FinanceTrackerDev-only flag to prefer instead.
+    @State private var showingSupabaseTest = false
+    #endif
 
     private let items: [ToolItem] = [
         ToolItem(title: "Ask Clarity", icon: "bubble.left.and.bubble.right.fill", isAvailable: true),
@@ -47,12 +62,118 @@ struct ToolsView: View {
                         }
                     }
                     .padding(.horizontal)
-                    .padding(.bottom, 24)
                     .readableContentWidth()
+
+                    accountSection
+                        .padding(.horizontal)
+                        .padding(.bottom, 24)
+                        .readableContentWidth()
+
+                    #if DEBUG
+                    developerSection
+                        .padding(.horizontal)
+                        .padding(.bottom, 24)
+                        .readableContentWidth()
+                    #endif
                 }
                 .refreshable { await DataSyncService.refresh(modelContext) }
             }
             .darkScreenBackground()
+        }
+        .alert("Sign Out", isPresented: $showingSignOutConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Sign Out", role: .destructive) {
+                Task { await signOut() }
+            }
+        } message: {
+            Text("Are you sure you want to sign out?")
+        }
+        .alert(
+            "Couldn't Sign Out",
+            isPresented: Binding(
+                get: { signOutErrorMessage != nil },
+                set: { isPresented in if !isPresented { signOutErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(signOutErrorMessage ?? "")
+        }
+        #if DEBUG
+        .sheet(isPresented: $showingSupabaseTest) {
+            NavigationStack {
+                SupabaseTestView()
+            }
+        }
+        #endif
+    }
+
+    #if DEBUG
+    private var developerSection: some View {
+        VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
+            Text("Developer")
+                .font(.sectionTitle)
+                .foregroundStyle(.textSecondary)
+                .padding(.horizontal, ClaritySpacing.xs)
+
+            SectionCard {
+                Button {
+                    showingSupabaseTest = true
+                } label: {
+                    HStack {
+                        Text("Supabase Test")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote)
+                            .foregroundStyle(.textTertiary)
+                    }
+                    .foregroundStyle(.textPrimary)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+            }
+        }
+    }
+    #endif
+
+    private var accountSection: some View {
+        VStack(alignment: .leading, spacing: ClaritySpacing.sm) {
+            Text("Account")
+                .font(.sectionTitle)
+                .foregroundStyle(.textSecondary)
+                .padding(.horizontal, ClaritySpacing.xs)
+
+            SectionCard {
+                Button {
+                    showingSignOutConfirmation = true
+                } label: {
+                    if isSigningOut {
+                        ProgressView()
+                            .tint(.white)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    } else {
+                        Text("Sign Out")
+                    }
+                }
+                .buttonStyle(.clarityDestructive)
+                .disabled(isSigningOut)
+            }
+        }
+    }
+
+    @MainActor
+    private func signOut() async {
+        isSigningOut = true
+        defer { isSigningOut = false }
+
+        do {
+            try await SupabaseAuthService.shared.signOut()
+            // SwiftData, CloudKit sync, and every other financial data store are untouched here —
+            // signing out only affects the Supabase session; `RootView.authState` is the sole
+            // source of truth for what's shown next.
+            signOutAction()
+        } catch {
+            signOutErrorMessage = "Couldn't sign out. Check your connection and try again."
         }
     }
 

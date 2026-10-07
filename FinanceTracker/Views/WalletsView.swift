@@ -20,7 +20,7 @@ struct WalletsView: View {
 /// UX-terminology decision only; the underlying `Wallet` SwiftData model, `WalletType`, and this
 /// struct's own supporting types are deliberately not renamed).
 struct WalletsContentView: View {
-    @Query(sort: \Wallet.sortOrder) private var allWallets: [Wallet]
+    @Query(filter: #Predicate<Wallet> { !$0.isSoftDeleted }, sort: \Wallet.sortOrder) private var allWallets: [Wallet]
 
     @State private var showingNewWallet = false
     @State private var editingWallet: Wallet? // TEMP default set below for verification, revert

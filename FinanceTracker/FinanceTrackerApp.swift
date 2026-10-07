@@ -12,8 +12,11 @@ struct FinanceTrackerApp: App {
             SharedModelContainer.resetStoreForUITesting()
             BudgetSettingsStore.resetForUITesting()
         }
-        container = SharedModelContainer.make()
-        SeedData.seedIfNeeded(context: container.mainContext)
+        container = SharedModelContainer.makeOrFatal()
+        // Seeding moved to `RootView` (Phase 4A) — it must only happen once auth state is known,
+        // never unconditionally at launch, so an existing Supabase user on a fresh install doesn't
+        // get a generic starter set that then gets pushed to Supabase as duplicate data. See
+        // `RootView`'s own `.task` for where this now runs.
         CategorizationService.modelContext = container.mainContext
         SpendingInsightsService.modelContext = container.mainContext
         // Gated by the single collaboration feature flag: while it's off (the current Personal

@@ -84,6 +84,10 @@ struct HeadCategoryPickerView: View {
         let colorHex = Self.defaultColorChoices[headCategories.count % Self.defaultColorChoices.count]
         let newHead = HeadCategory(name: trimmed, icon: Self.defaultIcon, colorHex: colorHex, sortOrder: nextSortOrder)
         modelContext.insert(newHead)
+        // Explicit save rather than relying on SwiftData's lazy autosave — see
+        // `AddTransactionView.save()`'s identical comment: without this, a new head category
+        // could vanish before the next autosave, and would never reach automatic Supabase sync.
+        try? modelContext.save()
         selection = newHead
         dismiss()
     }

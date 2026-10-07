@@ -59,7 +59,7 @@ private let suggestedQuestions: [AskClaritySuggestedQuestion] = [
 /// was opened from.
 struct AskClarityView: View {
     @ObservedObject private var budgetSettings = BudgetSettingsStore.shared
-    @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     @Query private var allBudgets: [Budget]
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
 

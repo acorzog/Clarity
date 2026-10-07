@@ -69,11 +69,15 @@ enum ForecastPaceState: Equatable {
 
 /// One unsettled Shared event's net outstanding balance — see `CLARITY_HOME_SPEC.md` §7.
 /// Positive `amount` means the current user is owed money overall in this event; negative means
-/// they owe. Reuses `SharedEvent.outstandingNetBalance` verbatim — no new balance math.
+/// they owe. `amount` is computed once by `upcomingSharedBalances` below (from the same
+/// `SharedEvent.balances` math `.outstandingNetBalance` itself reuses — no new balance math) and
+/// stored here, rather than re-deriving it from `event` on every access: `.filter`/`.sorted`
+/// there each read `amount` multiple times per event, which would otherwise re-walk every
+/// expense/settlement in the event once per read.
 struct UpcomingSharedBalance: Identifiable {
     let event: SharedEvent
+    let amount: Decimal
     var id: PersistentIdentifier { event.persistentModelID }
-    var amount: Decimal { event.outstandingNetBalance }
 }
 
 /// Home-specific deterministic calculations layered on top of `BudgetCalculator`'s existing
@@ -216,14 +220,22 @@ enum HomeCalculator {
     static let maxUpcomingItems = 3
 
     /// Every non-fully-settled Shared event's net outstanding balance, most-outstanding-first —
-    /// see `CLARITY_HOME_SPEC.md` §7. V1 Upcoming's only data source; reuses `SharedEvent.
-    /// isFullySettled`/`.outstandingNetBalance` (`Models/SharedEventQuerying.swift`) exactly, and
-    /// never creates or modifies a `SharedExpense`/`Entry`.
+    /// see `CLARITY_HOME_SPEC.md` §7. V1 Upcoming's only data source; matches `SharedEvent.
+    /// isFullySettled`/`.outstandingNetBalance` (`Models/SharedEventQuerying.swift`) exactly
+    /// (same two conditions, same order), and never creates or modifies a `SharedExpense`/
+    /// `Entry`. Reads `event.balances` once per event — rather than via those two separate
+    /// properties, which would each re-walk the event's full expense/settlement list — since
+    /// `isFullySettled` ("every individual balance is zero") and the net total used below aren't
+    /// otherwise interchangeable (balances can net to zero while individually nonzero).
     static func upcomingSharedBalances(events: [SharedEvent]) -> [UpcomingSharedBalance] {
         events
-            .filter { !$0.isFullySettled }
-            .map { UpcomingSharedBalance(event: $0) }
-            .filter { $0.amount != 0 }
+            .compactMap { event -> UpcomingSharedBalance? in
+                let balances = event.balances
+                guard !balances.allSatisfy({ $0.amount == 0 }) else { return nil }
+                let net = balances.reduce(Decimal(0)) { $0 + $1.amount }
+                guard net != 0 else { return nil }
+                return UpcomingSharedBalance(event: event, amount: net)
+            }
             .sorted { abs($0.amount) > abs($1.amount) }
     }
 

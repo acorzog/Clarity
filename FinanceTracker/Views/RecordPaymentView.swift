@@ -11,7 +11,7 @@ struct RecordPaymentView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \Wallet.sortOrder) private var allWallets: [Wallet]
+    @Query(filter: #Predicate<Wallet> { !$0.isSoftDeleted }, sort: \Wallet.sortOrder) private var allWallets: [Wallet]
     @Query private var allCategories: [Category]
 
     @State private var amountText = ""

@@ -407,6 +407,7 @@ struct CategoryEditorView: View {
             category.customColorHex = selectedColorHex
             category.isSavings = isSavings
             category.isFixedPlannedCategory = isFixedPlannedCategory
+            category.updatedAt = .now
             onSave?(category)
         } else {
             let newCategory = Category(
@@ -422,6 +423,11 @@ struct CategoryEditorView: View {
             modelContext.insert(newCategory)
             onSave?(newCategory)
         }
+        // Explicit save rather than relying on SwiftData's lazy autosave — see
+        // `AddTransactionView.save()`'s identical comment: without this, a created or edited
+        // category could vanish before the next autosave, and would never reach automatic
+        // Supabase sync.
+        try? modelContext.save()
         dismiss()
     }
 }

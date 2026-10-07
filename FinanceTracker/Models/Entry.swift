@@ -32,6 +32,36 @@ final class Entry {
     /// an installed app's store — without it, migration fails outright on launch.
     var isPlannedExpense: Bool = false
 
+    /// Soft-delete marker — Phase 3B-1. Normal "deleting" an entry sets this `true` (and bumps
+    /// `updatedAt`) instead of calling `modelContext.delete(entry)`, so a future Supabase sync can
+    /// learn a row was removed by seeing this flag change, rather than inferring deletion from a
+    /// row's mere absence (which a one-way snapshot sync can't distinguish from "never fetched").
+    /// The `= false` here (not just an init default) is required for SwiftData's lightweight
+    /// migration to backfill this attribute on rows that already exist in an installed app's
+    /// store — same requirement as `isPlannedExpense` above. Also needs an `init` parameter (even
+    /// though no real call site ever constructs a pre-deleted `Entry`) for the same reason
+    /// `isPlannedExpense` has one and `remoteID`/`createdAt`/`updatedAt` don't: a non-Optional
+    /// stored property's inline default alone was empirically found to not reliably survive a
+    /// post-construction mutation + `modelContext.save()` round trip unless the initializer also
+    /// assigns it — verified directly against this SwiftData version by a failing test before this
+    /// parameter was added.
+    var isSoftDeleted: Bool = false
+
+    /// This entry's stable cross-device identity for a future Supabase sync — nil until first
+    /// mapped, mirroring `Settlement`/`SharedEvent`/`SharedExpense`'s existing CloudKit `remoteID`
+    /// convention (see `CloudKitRecordIdentity.swift`'s doc comment). Deliberately never minted at
+    /// ordinary local construction: SwiftData's own `persistentModelID` is store-local and not
+    /// guaranteed stable across devices or migrations, so it can't stand in for this.
+    var remoteID: UUID?
+    /// Local creation timestamp, set once at construction.
+    var createdAt: Date = Date.now
+    /// Bumped by hand (`entry.updatedAt = .now`) at every intentional mutation site — see
+    /// `AddTransactionView.save()`'s edit branch — following the same explicit-bump convention
+    /// `SharedEvent`/`SharedExpense` already use. Deliberately not a `didSet` observer: one here
+    /// would also fire on SwiftData's own internal property access/relationship faulting, not just
+    /// genuine user edits, risking recursive mutation during a save.
+    var updatedAt: Date = Date.now
+
     var category: Category?
     var wallet: Wallet
     var destinationWallet: Wallet?
@@ -56,7 +86,10 @@ final class Entry {
         destinationWallet: Wallet? = nil,
         recurrence: RecurrenceRule = .none,
         excludeFromBudget: Bool = false,
-        isPlannedExpense: Bool = false
+        isPlannedExpense: Bool = false,
+        isSoftDeleted: Bool = false,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
     ) {
         self.amount = amount
         self.date = date
@@ -68,6 +101,9 @@ final class Entry {
         self.recurrence = recurrence
         self.excludeFromBudget = excludeFromBudget
         self.isPlannedExpense = isPlannedExpense
+        self.isSoftDeleted = isSoftDeleted
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -97,14 +133,17 @@ enum TransactionSaving {
         recurrence: RecurrenceRule = .none,
         excludeFromBudget: Bool = false,
         isPlannedExpense: Bool = false,
+        prefetchedBudgets: [Budget]? = nil,
         modelContext: ModelContext
     ) -> Entry {
         // Auto-marks on top of whatever the caller already decided (a manual toggle in
         // AddTransactionView, or simply `false`) — see `matchesFixedPlannedAmount`'s doc comment.
-        // Fetched here rather than threaded through every caller's signature so this benefits
-        // every entry point that already goes through this single choke point (manual save,
-        // voice quick-save) without their own changes.
-        let budgets = (try? modelContext.fetch(FetchDescriptor<Budget>())) ?? []
+        // Fetched here by default (rather than threaded through every caller's signature) so this
+        // benefits every entry point that already goes through this single choke point without
+        // their own changes. A caller that creates several entries in one loop (voice quick-save)
+        // can pass `prefetchedBudgets` instead, so the whole batch shares one fetch rather than
+        // re-fetching the entire, unboundedly-growing Budget table once per entry.
+        let budgets = prefetchedBudgets ?? ((try? modelContext.fetch(FetchDescriptor<Budget>())) ?? [])
         let autoPlanned = type == .expense && budgets.matchesFixedPlannedAmount(amount, for: category, month: date)
 
         let entry = Entry(

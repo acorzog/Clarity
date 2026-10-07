@@ -33,7 +33,8 @@ struct WalletEntityQuery: EntityQuery, EntityStringQuery {
     }
 
     private func allEntities() -> [WalletEntity] {
-        let context = ModelContext(SharedModelContainer.make())
+        guard let container = try? SharedModelContainer.make() else { return [] }
+        let context = ModelContext(container)
         let wallets = (try? context.fetch(FetchDescriptor<Wallet>(sortBy: [SortDescriptor(\.name)]))) ?? []
         return Self.makeEntities(from: wallets)
     }

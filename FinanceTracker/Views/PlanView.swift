@@ -58,6 +58,7 @@ struct PlanView: View {
     private func setAmount(_ amount: Decimal, for category: Category) {
         if let existing = allBudgets.budget(for: category, month: month) {
             existing.monthlyLimit = amount
+            existing.updatedAt = .now
         } else {
             let (m, y) = month.monthYearComponents
             modelContext.insert(Budget(category: category, monthlyLimit: amount, month: m, year: y))
@@ -78,6 +79,7 @@ struct PlanView: View {
     private func setFixed(_ isFixed: Bool, for category: Category) {
         if let existing = allBudgets.budget(for: category, month: month) {
             existing.isFixed = isFixed
+            existing.updatedAt = .now
         } else {
             let (m, y) = month.monthYearComponents
             modelContext.insert(Budget(
@@ -92,6 +94,7 @@ struct PlanView: View {
     private func setHidden(_ hidden: Bool, for category: Category) {
         if let existing = allBudgets.budget(for: category, month: month) {
             existing.isHidden = hidden
+            existing.updatedAt = .now
         } else if hidden {
             let (m, y) = month.monthYearComponents
             modelContext.insert(Budget(category: category, monthlyLimit: 0, month: m, year: y, isHidden: true))
@@ -103,6 +106,10 @@ struct PlanView: View {
     private func addCategory(name: String, to head: HeadCategory, isIncome: Bool) {
         let category = Category(name: name, isIncome: isIncome, headCategory: head)
         modelContext.insert(category)
+        // Explicit save rather than relying on SwiftData's lazy autosave — see `setAmount`'s
+        // identical comment above: without this, the quick-created category could vanish before
+        // the next autosave, and would never reach automatic Supabase sync.
+        try? modelContext.save()
         newlyCreatedCategoryID = category.persistentModelID
     }
 

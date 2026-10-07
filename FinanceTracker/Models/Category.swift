@@ -22,6 +22,15 @@ final class Category {
     /// backfill this attribute on categories that already exist in an installed app's store.
     var isFixedPlannedCategory: Bool = false
 
+    /// This category's stable cross-device identity for a future Supabase sync — see `Entry.
+    /// remoteID`'s doc comment for the full rationale; the same convention applies here.
+    var remoteID: UUID?
+    var createdAt: Date = Date.now
+    /// Bumped by hand at every intentional mutation site (see `CategoryEditorView.save()`,
+    /// `EditCategoriesView`/`RemovedCategoriesView`'s archive/restore) — deliberately not a
+    /// `didSet` observer, for the same recursive-mutation reason documented on `Entry.updatedAt`.
+    var updatedAt: Date = Date.now
+
     var headCategory: HeadCategory
 
     @Relationship(deleteRule: .nullify, inverse: \Entry.category)
@@ -39,7 +48,9 @@ final class Category {
         isArchived: Bool = false,
         isIncome: Bool = false,
         isFixedPlannedCategory: Bool = false,
-        headCategory: HeadCategory
+        headCategory: HeadCategory,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
     ) {
         self.name = name
         self.customIcon = customIcon
@@ -50,6 +61,8 @@ final class Category {
         self.isIncome = isIncome
         self.isFixedPlannedCategory = isFixedPlannedCategory
         self.headCategory = headCategory
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 
     /// The category's own color if set, otherwise its HeadCategory's color.

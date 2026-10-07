@@ -35,6 +35,7 @@ struct RemovedCategoriesView: View {
 
     private func restore(_ category: Category) {
         category.isArchived = false
+        category.updatedAt = .now
         // `@Query` reliably re-renders on an explicit context save, not just the in-memory
         // property mutation above — see the doc comment on `allCategories`.
         try? modelContext.save()

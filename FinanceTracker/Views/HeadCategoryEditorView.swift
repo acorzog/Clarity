@@ -13,6 +13,7 @@ struct HeadCategoryEditorView: View {
     let headCategory: HeadCategory
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
 
     @State private var name = ""
     @State private var icon = "square.grid.2x2.fill"
@@ -193,6 +194,11 @@ struct HeadCategoryEditorView: View {
         headCategory.name = trimmed
         headCategory.icon = icon
         headCategory.colorHex = colorHex
+        headCategory.updatedAt = .now
+        // Explicit save rather than relying on SwiftData's lazy autosave — see
+        // `AddTransactionView.save()`'s identical comment: without this, an edited head category
+        // could revert before the next autosave, and would never reach automatic Supabase sync.
+        try? modelContext.save()
         dismiss()
     }
 }

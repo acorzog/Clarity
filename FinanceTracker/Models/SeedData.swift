@@ -2,7 +2,15 @@ import Foundation
 import SwiftData
 
 enum SeedData {
-    static func seedIfNeeded(context: ModelContext) {
+    /// Throws rather than swallowing a failed save — the empty-store gate below only works if a
+    /// successful seed is actually durable before the next launch re-checks it (see this phase's
+    /// audit: a seed that stayed in-memory because the process died before an autosave got a
+    /// chance to run was indistinguishable from "never seeded," so the next launch's `guard`
+    /// re-triggered and inserted a whole new generation of HeadCategories/Categories/Wallet
+    /// alongside the first). The caller deciding to merely log a save failure rather than crash is
+    /// deliberate: losing the seed is recoverable (the next launch's gate will just try again),
+    /// but a failure here must never be mistaken for a successful seed by the caller.
+    static func seedIfNeeded(context: ModelContext) throws {
         let headCategoryCount = (try? context.fetchCount(FetchDescriptor<HeadCategory>())) ?? 0
         guard headCategoryCount == 0 else { return }
 
@@ -147,5 +155,10 @@ enum SeedData {
             isDefault: true
         )
         context.insert(spendingWallet)
+
+        // Durable immediately — not dependent on SwiftData's autosave timing, which is tied to
+        // app lifecycle events (background, etc.) and is never guaranteed to run before the
+        // process is terminated.
+        try context.save()
     }
 }

@@ -151,7 +151,10 @@ struct DayEntriesView: View {
 
     private func delete(_ entry: Entry) {
         entries.removeAll { $0 === entry }
-        modelContext.delete(entry)
+        // Soft delete (Phase 3B-1) — see `Entry.isSoftDeleted`'s doc comment — rather than
+        // `modelContext.delete(entry)`, so a future Supabase sync can see this change.
+        entry.isSoftDeleted = true
+        entry.updatedAt = .now
     }
 
     /// Re-syncs the local snapshot with SwiftData after the Add or Edit sheet closes. A newly
@@ -163,7 +166,7 @@ struct DayEntriesView: View {
     private func refreshEntries() {
         guard let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: day) else { return }
         let dayStart = day
-        let predicate = #Predicate<Entry> { $0.date >= dayStart && $0.date < dayEnd }
+        let predicate = #Predicate<Entry> { $0.date >= dayStart && $0.date < dayEnd && !$0.isSoftDeleted }
         let descriptor = FetchDescriptor<Entry>(predicate: predicate)
         if let fresh = try? modelContext.fetch(descriptor) {
             entries = fresh

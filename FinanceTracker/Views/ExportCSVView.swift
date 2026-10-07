@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct ExportCSVView: View {
-    @Query(sort: \Entry.date) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date) private var allEntries: [Entry]
 
     @State private var startDate: Date
     @State private var endDate: Date

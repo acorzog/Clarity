@@ -23,6 +23,29 @@ final class Wallet {
     var isArchived: Bool = false
     var sortOrder: Int = 0
 
+    /// Soft-delete marker — Phase 3D-1, mirroring `Entry.isSoftDeleted` exactly (including the
+    /// reason it isn't just named `isDeleted`: that name collides with `NSManagedObject`'s own
+    /// reserved `isDeleted` flag under SwiftData/Core Data and silently fails to persist — see
+    /// `Entry.isSoftDeleted`'s doc comment, Phase 3B-1). "Remove Account" in `WalletEditorView`
+    /// sets this instead of calling `modelContext.delete(wallet)`, so a future Supabase sync can
+    /// learn the wallet was removed (`is_deleted = true`) rather than the row just vanishing from
+    /// future upload batches with no explanation. Unlike `Entry`, a soft-deleted `Wallet`'s own
+    /// historical `Entry` rows are deliberately left untouched and still fully intact — only the
+    /// wallet itself disappears from normal lists/pickers (see `Wallet.active(in:)` and every
+    /// `@Query` site filtered for this). The `= false` here (not just an init default) is required
+    /// for SwiftData's lightweight migration to backfill this attribute on rows that already exist
+    /// in an installed app's store — same requirement as `Entry.isSoftDeleted`.
+    var isSoftDeleted: Bool = false
+
+    /// This wallet's stable cross-device identity for a future Supabase sync — see `Entry.
+    /// remoteID`'s doc comment for the full rationale; the same convention applies here.
+    var remoteID: UUID?
+    var createdAt: Date = Date.now
+    /// Bumped by hand at every intentional mutation site (see `WalletEditorView.save()`) —
+    /// deliberately not a `didSet` observer, for the same recursive-mutation reason documented on
+    /// `Entry.updatedAt`.
+    var updatedAt: Date = Date.now
+
     @Relationship(deleteRule: .deny, inverse: \Entry.wallet)
     var entries: [Entry] = []
 
@@ -47,7 +70,10 @@ final class Wallet {
         includeInNetWorth: Bool = true,
         isDefault: Bool = false,
         isArchived: Bool = false,
-        sortOrder: Int = 0
+        sortOrder: Int = 0,
+        isSoftDeleted: Bool = false,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
     ) {
         self.name = name
         self.type = type
@@ -59,6 +85,9 @@ final class Wallet {
         self.isDefault = isDefault
         self.isArchived = isArchived
         self.sortOrder = sortOrder
+        self.isSoftDeleted = isSoftDeleted
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 
     /// The effect this wallet's involvement in `entry` has on its own balance —
@@ -78,9 +107,13 @@ final class Wallet {
     }
 
     /// Every entry that touches this wallet's balance — as the primary wallet (expense/income/
-    /// outgoing transfer) or as a transfer's destination — newest first.
+    /// outgoing transfer) or as a transfer's destination — newest first. Excludes soft-deleted
+    /// entries (Phase 3B-1, `Entry.isSoftDeleted`) — `entries`/`incomingTransfers` are raw SwiftData
+    /// relationship arrays with no predicate of their own, unlike a `@Query`, so this is the one
+    /// place that filter must be applied by hand for every view built on this property
+    /// (`WalletEditorView`, `WalletTransactionsView`).
     var allEntries: [Entry] {
-        (entries + incomingTransfers).sorted { $0.date > $1.date }
+        (entries + incomingTransfers).filter { !$0.isSoftDeleted }.sorted { $0.date > $1.date }
     }
 
     /// Derived from starting balance plus every entry dated today or earlier touching this
@@ -107,24 +140,36 @@ final class Wallet {
     /// implementation rather than a second copy of this logic.
     func balance(asOf date: Date, calendar: Calendar = .current) -> Decimal {
         let cutoff = calendar.startOfDay(for: date)
-        let eligibleEntries = entries.filter { calendar.startOfDay(for: $0.date) <= cutoff }
-        let eligibleTransfers = incomingTransfers.filter { calendar.startOfDay(for: $0.date) <= cutoff }
+        // `!$0.isSoftDeleted` (Phase 3B-1) — a soft-deleted entry must stop affecting the balance,
+        // exactly as if it had been hard-deleted; see `allEntries`'s doc comment for why this
+        // can't be expressed once at the relationship declaration itself.
+        let eligibleEntries = entries.filter { !$0.isSoftDeleted && calendar.startOfDay(for: $0.date) <= cutoff }
+        let eligibleTransfers = incomingTransfers.filter { !$0.isSoftDeleted && calendar.startOfDay(for: $0.date) <= cutoff }
         return eligibleEntries.reduce(startingBalance) { $0 + effect(of: $1) } + eligibleTransfers.reduce(0) { $0 + effect(of: $1) }
     }
 
     /// False once the wallet has transactions on it (as source) or is the destination of a
-    /// transfer from another wallet — checked up front so the UI can offer "Archive instead"
-    /// before attempting a delete. Mirrors SwiftData's `.deny` rule on `entries`; `incomingTransfers`
-    /// itself only nullifies at the persistence layer, so this flag is what actually blocks that path.
+    /// transfer from another wallet. Originally gated whether `WalletEditorView`'s "Remove
+    /// Account" could proceed at all (a true hard delete would hit SwiftData's `.deny` rule on
+    /// `entries` otherwise) — since Phase 3D-1 switched that action to a soft delete, which never
+    /// invokes `modelContext.delete` and so never reaches that constraint, this property is no
+    /// longer used to gate removal. Still used by `resolveBalanceEdit` (via `!canBeDeleted` as
+    /// `hasRealHistory`) to decide whether editing the balance field should log an auditable
+    /// adjustment `Entry` or set `startingBalance` directly — an unrelated concern that happens to
+    /// share the same "does this wallet have real activity" predicate.
     var canBeDeleted: Bool {
         entries.isEmpty && incomingTransfers.isEmpty
     }
 }
 
 extension Wallet {
-    /// Non-archived wallets — archived wallets are excluded from every picker and fallback.
+    /// Non-archived, non-soft-deleted wallets — archived and removed wallets are excluded from
+    /// every picker and fallback. Centralizing the `isSoftDeleted` check here (Phase 3D-1) means
+    /// every caller that already routes through this helper — including the three Shortcuts/Siri
+    /// intents, which fetch wallets directly via `FetchDescriptor` rather than a filtered `@Query`
+    /// — is protected with no changes of their own.
     static func active(in wallets: [Wallet]) -> [Wallet] {
-        wallets.filter { !$0.isArchived }
+        wallets.filter { !$0.isArchived && !$0.isSoftDeleted }
     }
 
     /// The wallet to fall back to when none was explicitly requested: the default wallet if

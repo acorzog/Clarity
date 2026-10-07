@@ -3,7 +3,7 @@ import SwiftData
 
 struct WalletPickerView: View {
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \Wallet.name) private var wallets: [Wallet]
+    @Query(filter: #Predicate<Wallet> { !$0.isSoftDeleted }, sort: \Wallet.name) private var wallets: [Wallet]
     @Binding var selection: Wallet?
 
     /// Excluded so a transfer can't pick the same wallet as both source and destination.
