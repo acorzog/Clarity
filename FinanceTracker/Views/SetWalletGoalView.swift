@@ -34,6 +34,7 @@ struct SetWalletGoalView: View {
                 Button("Save") {
                     let trimmed = amountText.trimmingCharacters(in: .whitespaces)
                     wallet.goalAmount = trimmed.isEmpty ? nil : Decimal(decimalInput: trimmed)
+                    wallet.updatedAt = .now
                     dismiss()
                 }
                 .buttonStyle(.clarityPrimary)

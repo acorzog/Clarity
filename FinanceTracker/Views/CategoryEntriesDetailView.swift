@@ -156,7 +156,10 @@ struct CategoryEntriesDetailView: View {
 
     private func delete(_ entry: Entry) {
         entries.removeAll { $0 === entry }
-        modelContext.delete(entry)
+        // Soft delete (Phase 3B-1) — see `Entry.isSoftDeleted`'s doc comment — rather than
+        // `modelContext.delete(entry)`, so a future Supabase sync can see this change.
+        entry.isSoftDeleted = true
+        entry.updatedAt = .now
     }
 
     /// Writes straight to the same `Budget` rows Plan → Allocate reads/writes (`PlanView.
@@ -165,6 +168,7 @@ struct CategoryEntriesDetailView: View {
     private func setPlannedAmount(_ amount: Decimal, for category: Category, month: Date) {
         if let existing = allBudgets.budget(for: category, month: month) {
             existing.monthlyLimit = amount
+            existing.updatedAt = .now
         } else {
             let (m, y) = month.monthYearComponents
             modelContext.insert(Budget(category: category, monthlyLimit: amount, month: m, year: y))

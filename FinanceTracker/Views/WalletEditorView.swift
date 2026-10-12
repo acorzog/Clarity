@@ -6,7 +6,7 @@ struct WalletEditorView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \Wallet.sortOrder) private var allWallets: [Wallet]
+    @Query(filter: #Predicate<Wallet> { !$0.isSoftDeleted }, sort: \Wallet.sortOrder) private var allWallets: [Wallet]
 
     @State private var name = ""
     @State private var type: WalletType = .spending
@@ -19,7 +19,6 @@ struct WalletEditorView: View {
     @State private var showingGoalSheet = false
     @State private var showingAllTransactions = false
     @State private var showingRemoveAlert = false
-    @State private var showingCannotRemoveAlert = false
 
     @State private var hasLoaded = false
 
@@ -223,11 +222,7 @@ struct WalletEditorView: View {
 
                 Section {
                     Button(role: .destructive) {
-                        if wallet.canBeDeleted {
-                            showingRemoveAlert = true
-                        } else {
-                            showingCannotRemoveAlert = true
-                        }
+                        showingRemoveAlert = true
                     } label: {
                         Text("Remove Account")
                             .frame(maxWidth: .infinity)
@@ -265,17 +260,26 @@ struct WalletEditorView: View {
             Button("Cancel", role: .cancel) {}
             Button("Remove", role: .destructive) {
                 if let wallet {
-                    modelContext.delete(wallet)
+                    // Soft delete (Phase 3D-1) rather than `modelContext.delete(wallet)` — the
+                    // wallet disappears from every list/picker (see `active(in:)` and the
+                    // `@Query` filters above) but its historical entries and balance math are
+                    // untouched, and the removal itself can reach Supabase as a tombstone
+                    // (`WalletDTO.isDeleted`) instead of just vanishing from future sync batches
+                    // with no explanation. This also means a wallet with real transaction history
+                    // no longer needs to be blocked from removal the way a true hard delete did —
+                    // see `Wallet.canBeDeleted`'s doc comment, which is now only used by
+                    // `resolveBalanceEdit` below, not by this action.
+                    wallet.isSoftDeleted = true
+                    wallet.updatedAt = .now
+                    // Explicit save — same rollback hazard `save()` above already guards against;
+                    // without this, a removed wallet could reappear (or just never actually be
+                    // removed) before the next autosave.
+                    try? modelContext.save()
                 }
                 dismiss()
             }
         } message: {
             Text("This can't be undone.")
-        }
-        .alert("Can't Remove Account", isPresented: $showingCannotRemoveAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("This account has transactions on it, or is the destination of a transfer from another account. Archive it instead, or remove those transactions first.")
         }
     }
 
@@ -352,6 +356,7 @@ struct WalletEditorView: View {
             wallet.colorHex = colorHex
             wallet.icon = icon
             wallet.includeInNetWorth = includeInNetWorth
+            wallet.updatedAt = .now
             applyDefault(to: wallet, isDefault: isDefault)
         } else {
             let nextSortOrder = (allWallets.map(\.sortOrder).max() ?? -1) + 1
@@ -368,6 +373,13 @@ struct WalletEditorView: View {
             modelContext.insert(newWallet)
             applyDefault(to: newWallet, isDefault: isDefault)
         }
+        // Explicit save rather than relying on SwiftData's lazy autosave — see
+        // `AddTransactionView.save()`'s identical comment: `RootView` calls `modelContext.
+        // rollback()` on every foreground transition and cross-process store change, which
+        // silently discards an unsaved insert/mutation. Without this, an edited wallet's new
+        // type/balance (or a freshly logged "Balance adjustment" Entry) could vanish — and never
+        // reach the automatic Supabase sync — before the user ever leaves this screen.
+        try? modelContext.save()
         dismiss()
     }
 
@@ -376,6 +388,7 @@ struct WalletEditorView: View {
         guard isDefault else { return }
         for other in allWallets where other !== wallet {
             other.isDefault = false
+            other.updatedAt = .now
         }
     }
 }

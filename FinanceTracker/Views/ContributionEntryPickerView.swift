@@ -10,7 +10,7 @@ struct ContributionEntryPickerView: View {
     let onSelect: (Entry) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
 
     private var eligibleEntries: [Entry] {
         allEntries.filter { $0.goalContribution == nil }

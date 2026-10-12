@@ -5,9 +5,8 @@ struct EntryListView: View {
     let month: Date
     var searchText: String = ""
 
-    @Environment(\.modelContext) private var modelContext
     @ObservedObject private var settings = OverviewSettingsStore.shared
-    @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     @State private var editingEntry: Entry?
 
     private var monthEntries: [Entry] { allEntries.inMonth(month) }
@@ -73,7 +72,10 @@ struct EntryListView: View {
                             .listRowBackground(Color.white.opacity(0.05))
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
-                                    modelContext.delete(entry)
+                                    // Soft delete (Phase 3B-1) — see `Entry.isSoftDeleted`'s doc
+                                    // comment — rather than `modelContext.delete(entry)`.
+                                    entry.isSoftDeleted = true
+                                    entry.updatedAt = .now
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }

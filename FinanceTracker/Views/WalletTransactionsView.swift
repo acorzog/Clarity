@@ -4,7 +4,6 @@ import SwiftData
 struct WalletTransactionsView: View {
     let wallet: Wallet
 
-    @Environment(\.modelContext) private var modelContext
     @State private var editingEntry: Entry?
 
     /// Each entry touching this wallet paired with the wallet's balance immediately after it —
@@ -54,7 +53,10 @@ struct WalletTransactionsView: View {
                                 .listRowBackground(Color.white.opacity(0.05))
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
-                                        modelContext.delete(row.entry)
+                                        // Soft delete (Phase 3B-1) — see `Entry.isSoftDeleted`'s doc
+                                        // comment — rather than `modelContext.delete(row.entry)`.
+                                        row.entry.isSoftDeleted = true
+                                        row.entry.updatedAt = .now
                                     } label: {
                                         Label("Delete", systemImage: "trash")
                                     }

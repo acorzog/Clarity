@@ -313,6 +313,30 @@ final class VoiceExpenseRecorder: NSObject, ObservableObject {
         }
     }
 
+    /// Immediately tears down an in-progress session without waiting for a final transcript —
+    /// for when the app itself is being backgrounded/interrupted, not when the person releases
+    /// the mic. `stopRecording()`'s own 2-second grace period exists to let Speech's real final
+    /// transcript still land after release; that grace is meaningless once there's no app in the
+    /// foreground to receive it, and leaving it running would otherwise keep the audio engine and
+    /// `AVAudioSession` alive — with nothing on screen driving them — until Speech itself times
+    /// out, or indefinitely if it never does (see `stopRecording()`'s own doc comment on that
+    /// known Speech limitation).
+    func cancelRecording() {
+        guard isRecording else { return }
+        // Supersedes this session unconditionally, same as `startRecording()` — any pending
+        // delivery or bounded-fallback `Task` keyed on the old ID becomes a no-op.
+        recognitionSessionID = UUID()
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        isRecording = false
+        audioLevel = 0
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        phase = .idle
+    }
+
     // `deinit` is nonisolated even for a `@MainActor` class, so it cannot call
     // `stopRecording()`. End the recognition task directly, and mirror
     // `stopRecording()`'s own cleanup (stop the engine *and* remove its input
@@ -373,7 +397,8 @@ struct AddTransactionView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \Wallet.name) private var allWallets: [Wallet]
+    @Environment(\.scenePhase) private var scenePhase
+    @Query(filter: #Predicate<Wallet> { !$0.isSoftDeleted }, sort: \Wallet.name) private var allWallets: [Wallet]
     @Query(sort: \Category.name) private var allCategories: [Category]
     @Query private var allBudgets: [Budget]
     @ObservedObject private var preferences = AppPreferencesStore.shared
@@ -395,6 +420,14 @@ struct AddTransactionView: View {
     @State private var recurrence: RecurrenceRule = .none
     @State private var excludeFromBudget = false
     @State private var isPlannedExpense = false
+    /// Guards `save()` against being invoked a second time before the first call's `dismiss()`
+    /// has actually removed this view — e.g. a second tap landing during the sheet's dismiss
+    /// animation. Without this, two taps close enough together could each independently pass
+    /// `isValid` and create two separate `Entry` rows for the same transaction (confirmed as the
+    /// root cause of a real duplicate — Phase 3B-7). Reset back to `false` on `save()`'s own
+    /// early-return path so a genuinely invalid attempt doesn't permanently disable the button;
+    /// not reset after a successful save, since the view is being dismissed at that point anyway.
+    @State private var isSaving = false
 
     @State private var showingCategoryPicker = false
     @State private var showingSourceWalletPicker = false
@@ -586,7 +619,7 @@ struct AddTransactionView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", action: save)
-                        .disabled(!isValid)
+                        .disabled(!isValid || isSaving)
                         .fontWeight(.semibold)
                 }
             }
@@ -642,6 +675,14 @@ struct AddTransactionView: View {
             // `VoiceExpenseRecorder.onFinalTranscript`'s doc comment. Set here (not `.onChange`)
             // so this never re-runs on every partial transcript update.
             voiceRecorder.onFinalTranscript = handleVoiceFinalTranscript
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // A hold/press can be interrupted by the app losing the foreground (an incoming
+            // call, Control Center, switching apps) before the mic button's own tap handler ever
+            // fires. Without this, the mic/audio session could be left running with nothing on
+            // screen driving it — see `VoiceExpenseRecorder.cancelRecording()`'s doc comment.
+            guard newPhase != .active else { return }
+            voiceRecorder.cancelRecording()
         }
     }
 
@@ -969,7 +1010,13 @@ struct AddTransactionView: View {
     }
 
     private func save() {
-        guard let amountValue, let selectedWallet, isValid else { return }
+        guard !isSaving else { return }
+        isSaving = true
+
+        guard let amountValue, let selectedWallet, isValid else {
+            isSaving = false
+            return
+        }
 
         let savedEntry: Entry
         if let entry {
@@ -985,6 +1032,7 @@ struct AddTransactionView: View {
             let autoPlanned = entryType == .expense
                 && allBudgets.matchesFixedPlannedAmount(amountValue, for: selectedCategory, month: date)
             entry.isPlannedExpense = (entryType == .expense && isPlannedExpense) || autoPlanned
+            entry.updatedAt = .now
             savedEntry = entry
         } else {
             savedEntry = TransactionSaving.createEntry(

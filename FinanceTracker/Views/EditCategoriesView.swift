@@ -9,7 +9,7 @@ private enum TileBadge {
 struct CategoriesView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
-    @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     // Also watched directly (not just reached via `head.categories`) so archiving/restoring a
     // category actually re-renders this screen — see `RemovedCategoriesView`'s doc comment on the
     // same `@Query<HeadCategory>`-doesn't-see-`Category`-changes issue this was already exposed to.
@@ -56,11 +56,13 @@ struct CategoriesView: View {
 
     private func archive(_ category: Category) {
         category.isArchived = true
+        category.updatedAt = .now
         try? modelContext.save()
     }
 
     private func restore(_ category: Category) {
         category.isArchived = false
+        category.updatedAt = .now
         try? modelContext.save()
     }
 

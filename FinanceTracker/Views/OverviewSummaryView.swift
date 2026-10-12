@@ -5,7 +5,7 @@ struct OverviewSummaryView: View {
     let month: Date
 
     @ObservedObject private var settings = OverviewSettingsStore.shared
-    @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
 
     // `.budgetEligible` excludes `excludeFromBudget` entries (e.g. wallet balance adjustments)
     // from these analytical totals — see `Models/BudgetEligibility.swift`. This never affects
@@ -102,7 +102,7 @@ private struct SpendingHealthCardView: View {
     let month: Date
 
     @ObservedObject private var budgetSettings = BudgetSettingsStore.shared
-    @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     @Query private var allBudgets: [Budget]
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
 

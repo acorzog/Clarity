@@ -15,7 +15,7 @@ import SwiftData
 struct CalendarView: View {
     let month: Date
 
-    @Query(sort: \Entry.date) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date) private var allEntries: [Entry]
     @State private var selectedDay: Date?
     @State private var showingDayDetail = false
 

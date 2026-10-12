@@ -479,12 +479,17 @@ enum VoiceQuickSave {
     ) -> [Entry]? {
         guard let wallet, !expenses.isEmpty else { return nil }
 
+        // Fetched once for the whole batch — a multi-clause phrase ("20 en taxi y 35 en
+        // gasolina") would otherwise have `createEntry` re-fetch this same, unboundedly-growing
+        // table once per clause for no new information.
+        let budgets = (try? modelContext.fetch(FetchDescriptor<Budget>())) ?? []
+
         let entries = expenses.map { expense -> Entry in
             let matchingCategories = categories.filter { !$0.isArchived && $0.isIncome == (expense.entryType == .income) }
             let category = VoiceExpenseParser.categoryMatch(for: expense.note, in: matchingCategories)
             return TransactionSaving.createEntry(
                 amount: expense.amount, date: expense.date, note: expense.note, type: expense.entryType,
-                category: category, wallet: wallet, modelContext: modelContext
+                category: category, wallet: wallet, prefetchedBudgets: budgets, modelContext: modelContext
             )
         }
 

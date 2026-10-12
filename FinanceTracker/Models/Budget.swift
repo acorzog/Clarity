@@ -15,14 +15,33 @@ final class Budget {
     /// starts blank until set explicitly.
     var isFixed: Bool = false
 
+    /// This budget's stable cross-device identity for Supabase sync — see `Entry.remoteID`'s doc
+    /// comment for the full rationale; the same convention applies here.
+    var remoteID: UUID?
+    var createdAt: Date = Date.now
+    /// Bumped by hand at every intentional mutation site, following the same explicit-bump
+    /// convention `Entry`/`Wallet`/`Category`/`HeadCategory` already use.
+    var updatedAt: Date = Date.now
+
     var category: Category
 
-    init(category: Category, monthlyLimit: Decimal, month: Int, year: Int, isHidden: Bool = false, isFixed: Bool = false) {
+    init(
+        category: Category,
+        monthlyLimit: Decimal,
+        month: Int,
+        year: Int,
+        isHidden: Bool = false,
+        isFixed: Bool = false,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
         self.category = category
         self.monthlyLimit = monthlyLimit
         self.month = month
         self.year = year
         self.isHidden = isHidden
         self.isFixed = isFixed
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }

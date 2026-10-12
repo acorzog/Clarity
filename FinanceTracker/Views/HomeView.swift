@@ -61,12 +61,13 @@ struct HomeView: View {
     @Binding var selectedTab: MainTab
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var budgetSettings = BudgetSettingsStore.shared
-    @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     @Query private var allBudgets: [Budget]
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
     @Query(sort: \Category.name) private var allCategories: [Category]
-    @Query(sort: \Wallet.sortOrder) private var allWallets: [Wallet]
+    @Query(filter: #Predicate<Wallet> { !$0.isSoftDeleted }, sort: \Wallet.sortOrder) private var allWallets: [Wallet]
     @Query(sort: \SharedEvent.createdAt, order: .reverse) private var sharedEvents: [SharedEvent]
 
     @StateObject private var voiceRecorder = VoiceExpenseRecorder()
@@ -264,6 +265,17 @@ struct HomeView: View {
                 voiceFeedbackMessage = nil
                 showVoiceQuickSaveToast(for: savedEntries)
             }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // A hold can be interrupted by the app losing the foreground (an incoming call,
+            // Control Center, switching apps) before the drag gesture's own `.onEnded` ever
+            // fires — SwiftUI doesn't guarantee that callback runs when the gesture is cut short
+            // this way. Without this, the floating mic could be left listening indefinitely with
+            // nothing on screen driving it — see `VoiceExpenseRecorder.cancelRecording()`'s doc
+            // comment.
+            guard newPhase != .active else { return }
+            isHoldingMic = false
+            voiceRecorder.cancelRecording()
         }
     }
 

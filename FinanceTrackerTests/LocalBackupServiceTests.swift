@@ -170,6 +170,98 @@ final class LocalBackupServiceTests: XCTestCase {
     /// A real backup exported before `isPlannedExpense` existed has no such key in its entry
     /// JSON — `EntrySnapshot`'s custom `init(from:)` must still decode it, defaulting to `false`,
     /// rather than failing the whole restore outright on a missing key.
+    // MARK: - Sync-identity round trip (remoteID / createdAt / updatedAt)
+
+    /// The exact gap the identity/change-tracking foundation closes: before `remoteID` existed on
+    /// `Entry`/`Wallet`/`Category`/`HeadCategory`, a backup/restore (a full delete + recreate, per
+    /// this type's own doc comment) would have silently orphaned any future-synced remote
+    /// identity. This confirms `remoteID`, `createdAt`, and `updatedAt` all survive the round trip
+    /// for every model that now carries them.
+    func testRoundTripPreservesRemoteIDCreatedAtAndUpdatedAt() throws {
+        let source = TestSupport.makeInMemoryContext()
+
+        let head = TestSupport.makeHeadCategory(name: "Everyday")
+        head.remoteID = UUID()
+        head.createdAt = Date(timeIntervalSince1970: 1_000)
+        head.updatedAt = Date(timeIntervalSince1970: 2_000)
+        source.insert(head)
+
+        let category = TestSupport.makeCategory(name: "Groceries", headCategory: head)
+        category.remoteID = UUID()
+        category.createdAt = Date(timeIntervalSince1970: 3_000)
+        category.updatedAt = Date(timeIntervalSince1970: 4_000)
+        source.insert(category)
+
+        let wallet = TestSupport.makeWallet(name: "Spending", startingBalance: 100)
+        wallet.remoteID = UUID()
+        wallet.createdAt = Date(timeIntervalSince1970: 5_000)
+        wallet.updatedAt = Date(timeIntervalSince1970: 6_000)
+        source.insert(wallet)
+
+        let entry = TestSupport.makeEntry(amount: 42, date: .now, type: .expense, category: category, wallet: wallet)
+        entry.remoteID = UUID()
+        entry.createdAt = Date(timeIntervalSince1970: 7_000)
+        entry.updatedAt = Date(timeIntervalSince1970: 8_000)
+        source.insert(entry)
+
+        try source.save()
+
+        let data = try LocalBackupService.export(context: source)
+        let destination = TestSupport.makeInMemoryContext()
+        try LocalBackupService.restore(from: data, context: destination)
+
+        let restoredHead = try XCTUnwrap(try destination.fetch(FetchDescriptor<HeadCategory>()).first)
+        XCTAssertEqual(restoredHead.remoteID, head.remoteID)
+        XCTAssertEqual(restoredHead.createdAt, head.createdAt)
+        XCTAssertEqual(restoredHead.updatedAt, head.updatedAt)
+
+        let restoredCategory = try XCTUnwrap(try destination.fetch(FetchDescriptor<FinanceTracker.Category>()).first)
+        XCTAssertEqual(restoredCategory.remoteID, category.remoteID)
+        XCTAssertEqual(restoredCategory.createdAt, category.createdAt)
+        XCTAssertEqual(restoredCategory.updatedAt, category.updatedAt)
+
+        let restoredWallet = try XCTUnwrap(try destination.fetch(FetchDescriptor<Wallet>()).first)
+        XCTAssertEqual(restoredWallet.remoteID, wallet.remoteID)
+        XCTAssertEqual(restoredWallet.createdAt, wallet.createdAt)
+        XCTAssertEqual(restoredWallet.updatedAt, wallet.updatedAt)
+
+        let restoredEntry = try XCTUnwrap(try destination.fetch(FetchDescriptor<Entry>()).first)
+        XCTAssertEqual(restoredEntry.remoteID, entry.remoteID)
+        XCTAssertEqual(restoredEntry.createdAt, entry.createdAt)
+        XCTAssertEqual(restoredEntry.updatedAt, entry.updatedAt)
+    }
+
+    /// A backup exported before these fields existed has no such keys in its JSON for any of the
+    /// four snapshot types — restoring it must still succeed, defaulting `remoteID` to nil and
+    /// the timestamps to a sensible fallback, exactly like `isPlannedExpense`'s existing
+    /// backward-compat handling on `EntrySnapshot`.
+    func testOlderSnapshotsMissingSyncIdentityKeysStillDecode() throws {
+        let headJSON = """
+        {"name":"Everyday","icon":"folder.fill","colorHex":"#FFFFFF","sortOrder":0}
+        """.data(using: .utf8)!
+        let walletJSON = """
+        {"name":"Spending","type":"spending","colorHex":"#FFFFFF","icon":"wallet.bifold",
+         "startingBalance":100,"includeInNetWorth":true,"isDefault":false,"isArchived":false,"sortOrder":0}
+        """.data(using: .utf8)!
+        let categoryJSON = """
+        {"name":"Groceries","iconIsEmoji":false,"isSavings":false,"isArchived":false,
+         "isIncome":false,"headCategoryIndex":0}
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let head = try decoder.decode(LocalBackupService.HeadCategorySnapshot.self, from: headJSON)
+        XCTAssertNil(head.remoteID)
+
+        let wallet = try decoder.decode(LocalBackupService.WalletSnapshot.self, from: walletJSON)
+        XCTAssertNil(wallet.remoteID)
+
+        let category = try decoder.decode(LocalBackupService.CategorySnapshot.self, from: categoryJSON)
+        XCTAssertNil(category.remoteID)
+        XCTAssertEqual(category.headCategoryIndex, 0)
+    }
+
     func testEntrySnapshotDecodesOlderBackupsMissingThePlannedExpenseKey() throws {
         let json = """
         {"amount":5787.6,"categoryIndex":15,"date":"2026-08-31T22:00:00Z",

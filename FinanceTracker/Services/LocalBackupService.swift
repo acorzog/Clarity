@@ -37,6 +37,35 @@ enum LocalBackupService {
         var icon: String
         var colorHex: String
         var sortOrder: Int
+        var remoteID: UUID?
+        var createdAt: Date
+        var updatedAt: Date
+
+        init(name: String, icon: String, colorHex: String, sortOrder: Int, remoteID: UUID?, createdAt: Date, updatedAt: Date) {
+            self.name = name
+            self.icon = icon
+            self.colorHex = colorHex
+            self.sortOrder = sortOrder
+            self.remoteID = remoteID
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+        }
+
+        /// Custom, rather than synthesized, only so `remoteID`/`createdAt`/`updatedAt` can default
+        /// safely when restoring a backup exported before they existed — same lesson `EntrySnapshot`'s
+        /// `isPlannedExpense` backward-compat decoder already established. There's no better proxy
+        /// for a missing timestamp here (unlike `EntrySnapshot`, which can fall back to its own
+        /// `date`), so both default to `.now` — the restored row's local history just starts now.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            icon = try container.decode(String.self, forKey: .icon)
+            colorHex = try container.decode(String.self, forKey: .colorHex)
+            sortOrder = try container.decode(Int.self, forKey: .sortOrder)
+            remoteID = try container.decodeIfPresent(UUID.self, forKey: .remoteID)
+            createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+            updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
+        }
     }
 
     struct CategorySnapshot: Codable {
@@ -48,6 +77,43 @@ enum LocalBackupService {
         var isArchived: Bool
         var isIncome: Bool
         var headCategoryIndex: Int
+        var remoteID: UUID?
+        var createdAt: Date
+        var updatedAt: Date
+
+        init(
+            name: String, customIcon: String?, iconIsEmoji: Bool, customColorHex: String?,
+            isSavings: Bool, isArchived: Bool, isIncome: Bool, headCategoryIndex: Int,
+            remoteID: UUID?, createdAt: Date, updatedAt: Date
+        ) {
+            self.name = name
+            self.customIcon = customIcon
+            self.iconIsEmoji = iconIsEmoji
+            self.customColorHex = customColorHex
+            self.isSavings = isSavings
+            self.isArchived = isArchived
+            self.isIncome = isIncome
+            self.headCategoryIndex = headCategoryIndex
+            self.remoteID = remoteID
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+        }
+
+        /// Same backward-compat rationale as `HeadCategorySnapshot.init(from:)`.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            customIcon = try container.decodeIfPresent(String.self, forKey: .customIcon)
+            iconIsEmoji = try container.decode(Bool.self, forKey: .iconIsEmoji)
+            customColorHex = try container.decodeIfPresent(String.self, forKey: .customColorHex)
+            isSavings = try container.decode(Bool.self, forKey: .isSavings)
+            isArchived = try container.decode(Bool.self, forKey: .isArchived)
+            isIncome = try container.decode(Bool.self, forKey: .isIncome)
+            headCategoryIndex = try container.decode(Int.self, forKey: .headCategoryIndex)
+            remoteID = try container.decodeIfPresent(UUID.self, forKey: .remoteID)
+            createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+            updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
+        }
     }
 
     struct WalletSnapshot: Codable {
@@ -61,6 +127,53 @@ enum LocalBackupService {
         var isDefault: Bool
         var isArchived: Bool
         var sortOrder: Int
+        /// Phase 3D-1 soft-delete marker — see `Wallet.isSoftDeleted`'s doc comment. Defaults
+        /// `false` for a backup exported before this field existed, same as `EntrySnapshot.
+        /// isSoftDeleted` below.
+        var isSoftDeleted: Bool
+        var remoteID: UUID?
+        var createdAt: Date
+        var updatedAt: Date
+
+        init(
+            name: String, type: WalletType, colorHex: String, icon: String, startingBalance: Decimal,
+            goalAmount: Decimal?, includeInNetWorth: Bool, isDefault: Bool, isArchived: Bool, sortOrder: Int,
+            isSoftDeleted: Bool = false, remoteID: UUID?, createdAt: Date, updatedAt: Date
+        ) {
+            self.name = name
+            self.type = type
+            self.colorHex = colorHex
+            self.icon = icon
+            self.startingBalance = startingBalance
+            self.goalAmount = goalAmount
+            self.includeInNetWorth = includeInNetWorth
+            self.isDefault = isDefault
+            self.isArchived = isArchived
+            self.sortOrder = sortOrder
+            self.isSoftDeleted = isSoftDeleted
+            self.remoteID = remoteID
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+        }
+
+        /// Same backward-compat rationale as `HeadCategorySnapshot.init(from:)`.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            type = try container.decode(WalletType.self, forKey: .type)
+            colorHex = try container.decode(String.self, forKey: .colorHex)
+            icon = try container.decode(String.self, forKey: .icon)
+            startingBalance = try container.decode(Decimal.self, forKey: .startingBalance)
+            goalAmount = try container.decodeIfPresent(Decimal.self, forKey: .goalAmount)
+            includeInNetWorth = try container.decode(Bool.self, forKey: .includeInNetWorth)
+            isDefault = try container.decode(Bool.self, forKey: .isDefault)
+            isArchived = try container.decode(Bool.self, forKey: .isArchived)
+            sortOrder = try container.decode(Int.self, forKey: .sortOrder)
+            isSoftDeleted = try container.decodeIfPresent(Bool.self, forKey: .isSoftDeleted) ?? false
+            remoteID = try container.decodeIfPresent(UUID.self, forKey: .remoteID)
+            createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+            updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
+        }
     }
 
     struct EntrySnapshot: Codable {
@@ -71,9 +184,15 @@ enum LocalBackupService {
         var recurrence: RecurrenceRule
         var excludeFromBudget: Bool
         var isPlannedExpense: Bool
+        /// Phase 3B-1 soft-delete marker — see `Entry.isSoftDeleted`'s doc comment. Defaults `false`
+        /// for a backup exported before this field existed, same as `isPlannedExpense` below.
+        var isSoftDeleted: Bool
         var categoryIndex: Int?
         var walletIndex: Int
         var destinationWalletIndex: Int?
+        var remoteID: UUID?
+        var createdAt: Date
+        var updatedAt: Date
 
         init(
             amount: Decimal,
@@ -83,9 +202,13 @@ enum LocalBackupService {
             recurrence: RecurrenceRule,
             excludeFromBudget: Bool,
             isPlannedExpense: Bool = false,
+            isSoftDeleted: Bool = false,
             categoryIndex: Int?,
             walletIndex: Int,
-            destinationWalletIndex: Int?
+            destinationWalletIndex: Int?,
+            remoteID: UUID? = nil,
+            createdAt: Date? = nil,
+            updatedAt: Date? = nil
         ) {
             self.amount = amount
             self.date = date
@@ -94,15 +217,25 @@ enum LocalBackupService {
             self.recurrence = recurrence
             self.excludeFromBudget = excludeFromBudget
             self.isPlannedExpense = isPlannedExpense
+            self.isSoftDeleted = isSoftDeleted
             self.categoryIndex = categoryIndex
             self.walletIndex = walletIndex
             self.destinationWalletIndex = destinationWalletIndex
+            self.remoteID = remoteID
+            // Falls back to `date` (this entry's own transaction date) rather than `.now`, since
+            // that's a meaningfully better stand-in for "when this was created" than the moment a
+            // backup happens to be exported/restored — only reachable from this memberwise init
+            // when a caller omits the timestamps outright (the decoder below always passes them).
+            self.createdAt = createdAt ?? date
+            self.updatedAt = updatedAt ?? date
         }
 
-        /// Custom, rather than synthesized, only so `isPlannedExpense` can default to `false`
-        /// when restoring a backup exported before this field existed — every other field is
-        /// decoded exactly as synthesis would. Without this, restoring an older backup (several
-        /// already exist, predating this change) would fail outright on a missing key.
+        /// Custom, rather than synthesized, so `isPlannedExpense`/`isSoftDeleted`/`remoteID`/
+        /// `createdAt`/`updatedAt` can all default safely when restoring a backup exported before
+        /// they existed — every other field is decoded exactly as synthesis would. Without this,
+        /// restoring an older backup (several already exist, predating these fields) would fail
+        /// outright on a missing key. `createdAt`/`updatedAt` fall back to this entry's own `date`
+        /// — a meaningfully better proxy than "now" for a transaction that may be years old.
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             amount = try container.decode(Decimal.self, forKey: .amount)
@@ -112,9 +245,13 @@ enum LocalBackupService {
             recurrence = try container.decode(RecurrenceRule.self, forKey: .recurrence)
             excludeFromBudget = try container.decode(Bool.self, forKey: .excludeFromBudget)
             isPlannedExpense = try container.decodeIfPresent(Bool.self, forKey: .isPlannedExpense) ?? false
+            isSoftDeleted = try container.decodeIfPresent(Bool.self, forKey: .isSoftDeleted) ?? false
             categoryIndex = try container.decodeIfPresent(Int.self, forKey: .categoryIndex)
             walletIndex = try container.decode(Int.self, forKey: .walletIndex)
             destinationWalletIndex = try container.decodeIfPresent(Int.self, forKey: .destinationWalletIndex)
+            remoteID = try container.decodeIfPresent(UUID.self, forKey: .remoteID)
+            createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? date
+            updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? date
         }
     }
 
@@ -124,6 +261,37 @@ enum LocalBackupService {
         var year: Int
         var isHidden: Bool
         var categoryIndex: Int
+        var remoteID: UUID?
+        var createdAt: Date
+        var updatedAt: Date
+
+        init(monthlyLimit: Decimal, month: Int, year: Int, isHidden: Bool, categoryIndex: Int, remoteID: UUID?, createdAt: Date, updatedAt: Date) {
+            self.monthlyLimit = monthlyLimit
+            self.month = month
+            self.year = year
+            self.isHidden = isHidden
+            self.categoryIndex = categoryIndex
+            self.remoteID = remoteID
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+        }
+
+        /// Custom, rather than synthesized, only so `remoteID`/`createdAt`/`updatedAt` can default
+        /// safely when restoring a backup exported before they existed — same backward-compat
+        /// lesson `HeadCategorySnapshot`'s decoder already established. There's no better proxy for
+        /// a missing timestamp here, so both default to `.now` — the restored row's local history
+        /// just starts now.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            monthlyLimit = try container.decode(Decimal.self, forKey: .monthlyLimit)
+            month = try container.decode(Int.self, forKey: .month)
+            year = try container.decode(Int.self, forKey: .year)
+            isHidden = try container.decode(Bool.self, forKey: .isHidden)
+            categoryIndex = try container.decode(Int.self, forKey: .categoryIndex)
+            remoteID = try container.decodeIfPresent(UUID.self, forKey: .remoteID)
+            createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+            updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? .now
+        }
     }
 
     struct GoalSnapshot: Codable {
@@ -245,13 +413,17 @@ enum LocalBackupService {
         var snapshot = DataSnapshot()
 
         snapshot.headCategories = headCategories.map {
-            HeadCategorySnapshot(name: $0.name, icon: $0.icon, colorHex: $0.colorHex, sortOrder: $0.sortOrder)
+            HeadCategorySnapshot(
+                name: $0.name, icon: $0.icon, colorHex: $0.colorHex, sortOrder: $0.sortOrder,
+                remoteID: $0.remoteID, createdAt: $0.createdAt, updatedAt: $0.updatedAt
+            )
         }
         snapshot.categories = categories.map {
             CategorySnapshot(
                 name: $0.name, customIcon: $0.customIcon, iconIsEmoji: $0.iconIsEmoji,
                 customColorHex: $0.customColorHex, isSavings: $0.isSavings, isArchived: $0.isArchived,
-                isIncome: $0.isIncome, headCategoryIndex: headCategoryIndex[ObjectIdentifier($0.headCategory)]!
+                isIncome: $0.isIncome, headCategoryIndex: headCategoryIndex[ObjectIdentifier($0.headCategory)]!,
+                remoteID: $0.remoteID, createdAt: $0.createdAt, updatedAt: $0.updatedAt
             )
         }
         snapshot.wallets = wallets.map {
@@ -259,22 +431,26 @@ enum LocalBackupService {
                 name: $0.name, type: $0.type, colorHex: $0.colorHex, icon: $0.icon,
                 startingBalance: $0.startingBalance, goalAmount: $0.goalAmount,
                 includeInNetWorth: $0.includeInNetWorth, isDefault: $0.isDefault,
-                isArchived: $0.isArchived, sortOrder: $0.sortOrder
+                isArchived: $0.isArchived, sortOrder: $0.sortOrder, isSoftDeleted: $0.isSoftDeleted,
+                remoteID: $0.remoteID, createdAt: $0.createdAt, updatedAt: $0.updatedAt
             )
         }
         snapshot.entries = entries.map {
             EntrySnapshot(
                 amount: $0.amount, date: $0.date, note: $0.note, type: $0.type, recurrence: $0.recurrence,
                 excludeFromBudget: $0.excludeFromBudget, isPlannedExpense: $0.isPlannedExpense,
+                isSoftDeleted: $0.isSoftDeleted,
                 categoryIndex: $0.category.map { categoryIndex[ObjectIdentifier($0)]! },
                 walletIndex: walletIndex[ObjectIdentifier($0.wallet)]!,
-                destinationWalletIndex: $0.destinationWallet.map { walletIndex[ObjectIdentifier($0)]! }
+                destinationWalletIndex: $0.destinationWallet.map { walletIndex[ObjectIdentifier($0)]! },
+                remoteID: $0.remoteID, createdAt: $0.createdAt, updatedAt: $0.updatedAt
             )
         }
         snapshot.budgets = budgets.map {
             BudgetSnapshot(
                 monthlyLimit: $0.monthlyLimit, month: $0.month, year: $0.year, isHidden: $0.isHidden,
-                categoryIndex: categoryIndex[ObjectIdentifier($0.category)]!
+                categoryIndex: categoryIndex[ObjectIdentifier($0.category)]!,
+                remoteID: $0.remoteID, createdAt: $0.createdAt, updatedAt: $0.updatedAt
             )
         }
         snapshot.goals = goals.map {
@@ -376,47 +552,65 @@ enum LocalBackupService {
 
         try eraseAllData(in: context)
 
-        let headCategories = snapshot.headCategories.map {
-            HeadCategory(name: $0.name, icon: $0.icon, colorHex: $0.colorHex, sortOrder: $0.sortOrder)
+        let headCategories = snapshot.headCategories.map { s -> HeadCategory in
+            let head = HeadCategory(
+                name: s.name, icon: s.icon, colorHex: s.colorHex, sortOrder: s.sortOrder,
+                createdAt: s.createdAt, updatedAt: s.updatedAt
+            )
+            head.remoteID = s.remoteID
+            return head
         }
         headCategories.forEach(context.insert)
 
-        let categories = snapshot.categories.map {
-            Category(
-                name: $0.name, customIcon: $0.customIcon, iconIsEmoji: $0.iconIsEmoji,
-                customColorHex: $0.customColorHex, isSavings: $0.isSavings, isArchived: $0.isArchived,
-                isIncome: $0.isIncome, headCategory: headCategories[$0.headCategoryIndex]
+        let categories = snapshot.categories.map { s -> Category in
+            let category = Category(
+                name: s.name, customIcon: s.customIcon, iconIsEmoji: s.iconIsEmoji,
+                customColorHex: s.customColorHex, isSavings: s.isSavings, isArchived: s.isArchived,
+                isIncome: s.isIncome, headCategory: headCategories[s.headCategoryIndex],
+                createdAt: s.createdAt, updatedAt: s.updatedAt
             )
+            category.remoteID = s.remoteID
+            return category
         }
         categories.forEach(context.insert)
 
-        let wallets = snapshot.wallets.map {
-            Wallet(
-                name: $0.name, type: $0.type, colorHex: $0.colorHex, icon: $0.icon,
-                startingBalance: $0.startingBalance, goalAmount: $0.goalAmount,
-                includeInNetWorth: $0.includeInNetWorth, isDefault: $0.isDefault,
-                isArchived: $0.isArchived, sortOrder: $0.sortOrder
+        let wallets = snapshot.wallets.map { s -> Wallet in
+            let wallet = Wallet(
+                name: s.name, type: s.type, colorHex: s.colorHex, icon: s.icon,
+                startingBalance: s.startingBalance, goalAmount: s.goalAmount,
+                includeInNetWorth: s.includeInNetWorth, isDefault: s.isDefault,
+                isArchived: s.isArchived, sortOrder: s.sortOrder, isSoftDeleted: s.isSoftDeleted,
+                createdAt: s.createdAt, updatedAt: s.updatedAt
             )
+            wallet.remoteID = s.remoteID
+            return wallet
         }
         wallets.forEach(context.insert)
 
-        let entries = snapshot.entries.map {
-            Entry(
-                amount: $0.amount, date: $0.date, note: $0.note, type: $0.type,
-                category: $0.categoryIndex.map { categories[$0] },
-                wallet: wallets[$0.walletIndex],
-                destinationWallet: $0.destinationWalletIndex.map { wallets[$0] },
-                recurrence: $0.recurrence, excludeFromBudget: $0.excludeFromBudget,
-                isPlannedExpense: $0.isPlannedExpense
+        let entries = snapshot.entries.map { s -> Entry in
+            let entry = Entry(
+                amount: s.amount, date: s.date, note: s.note, type: s.type,
+                category: s.categoryIndex.map { categories[$0] },
+                wallet: wallets[s.walletIndex],
+                destinationWallet: s.destinationWalletIndex.map { wallets[$0] },
+                recurrence: s.recurrence, excludeFromBudget: s.excludeFromBudget,
+                isPlannedExpense: s.isPlannedExpense,
+                createdAt: s.createdAt, updatedAt: s.updatedAt
             )
+            entry.remoteID = s.remoteID
+            entry.isSoftDeleted = s.isSoftDeleted
+            return entry
         }
         entries.forEach(context.insert)
 
         snapshot.budgets.forEach {
-            context.insert(Budget(
+            let budget = Budget(
                 category: categories[$0.categoryIndex], monthlyLimit: $0.monthlyLimit,
-                month: $0.month, year: $0.year, isHidden: $0.isHidden
-            ))
+                month: $0.month, year: $0.year, isHidden: $0.isHidden,
+                createdAt: $0.createdAt, updatedAt: $0.updatedAt
+            )
+            budget.remoteID = $0.remoteID
+            context.insert(budget)
         }
 
         let goals = snapshot.goals.map {

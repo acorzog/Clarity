@@ -4,15 +4,22 @@ import SwiftData
 
 /// A fresh in-memory ModelContainer/ModelContext pair — never touches the real (app group) store.
 enum TestSupport {
-    static func makeInMemoryContext() -> ModelContext {
+    /// Exposed separately from `makeInMemoryContext()` so a test can open more than one
+    /// `ModelContext` against the *same* underlying in-memory store — simulating "a fresh context
+    /// after a save" (e.g. a relaunch) without a second, unsaved context's pending inserts leaking
+    /// across, since two separate `ModelContainer`s each get their own isolated in-memory store.
+    static func makeInMemoryContainer() -> ModelContainer {
         let schema = Schema([
             HeadCategory.self, Category.self, Wallet.self, Entry.self, Budget.self, SpendingInsight.self,
             Person.self, SharedEvent.self, SharedExpense.self, SharedExpenseParticipant.self, Settlement.self,
             EventParticipant.self, Goal.self, GoalContribution.self
         ])
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-        let container = try! ModelContainer(for: schema, configurations: [configuration])
-        return ModelContext(container)
+        return try! ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    static func makeInMemoryContext() -> ModelContext {
+        ModelContext(makeInMemoryContainer())
     }
 
     static func makeWallet(

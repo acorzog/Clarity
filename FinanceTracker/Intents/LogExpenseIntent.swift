@@ -111,7 +111,14 @@ struct LogExpenseIntent: AppIntent {
             return .result(dialog: "Couldn't log this transaction — the amount wasn't captured. Add it manually in Clarity.")
         }
 
-        let context = ModelContext(SharedModelContainer.make())
+        // A failure here (App Group misconfigured, store transiently locked) used to crash this
+        // extension process outright via `fatalError` — see `SharedModelContainer.make()`'s doc
+        // comment. Falling back to a dialog instead means a transient hiccup reads as "this run
+        // failed," not "the shortcut is broken."
+        guard let container = try? SharedModelContainer.make() else {
+            return .result(dialog: "Couldn't reach Clarity's data right now — try again in a moment.")
+        }
+        let context = ModelContext(container)
 
         let allWallets = (try? context.fetch(FetchDescriptor<Wallet>(sortBy: [SortDescriptor(\.name)]))) ?? []
         guard let resolvedWallet = Self.resolveWallet(named: wallet?.name, from: allWallets) else {

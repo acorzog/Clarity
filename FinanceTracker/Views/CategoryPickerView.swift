@@ -4,7 +4,7 @@ import SwiftData
 struct CategoryPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
-    @Query(sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
     @Binding var selection: Category?
     var isIncome = false
 

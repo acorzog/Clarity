@@ -30,7 +30,8 @@ struct CategoryEntityQuery: EntityQuery, EntityStringQuery {
     }
 
     private func allEntities() -> [CategoryEntity] {
-        let context = ModelContext(SharedModelContainer.make())
+        guard let container = try? SharedModelContainer.make() else { return [] }
+        let context = ModelContext(container)
         let categories = (try? context.fetch(FetchDescriptor<Category>(sortBy: [SortDescriptor(\.name)]))) ?? []
         return categories
             .filter { !$0.isArchived && !$0.isIncome }

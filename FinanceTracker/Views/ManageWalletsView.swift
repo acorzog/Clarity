@@ -5,7 +5,7 @@ import SwiftData
 /// pattern (`.onMove` + a pinned edit mode) rather than introducing a new one.
 struct ManageWalletsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \Wallet.sortOrder) private var wallets: [Wallet]
+    @Query(filter: #Predicate<Wallet> { !$0.isSoftDeleted }, sort: \Wallet.sortOrder) private var wallets: [Wallet]
 
     var body: some View {
         NavigationStack {
@@ -66,6 +66,7 @@ struct ManageWalletsView: View {
         reordered.move(fromOffsets: source, toOffset: destination)
         for (index, wallet) in reordered.enumerated() {
             wallet.sortOrder = index
+            wallet.updatedAt = .now
         }
     }
 }
