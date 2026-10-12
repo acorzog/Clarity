@@ -134,8 +134,10 @@ final class SyncCoordinator {
     /// model; cleared only when a sync pass actually completes all six steps successfully (never
     /// on failure or on an outright skip, so changes that didn't really make it out aren't
     /// forgotten). Deliberately in-memory only — see `SyncLastSuccessStoring`'s own doc comment
-    /// for why this is never persisted.
-    private var hasPendingLocalChanges = false
+    /// for why this is never persisted. Externally readable (Phase 6.1) so `AccountView` can tell,
+    /// right before sign-out, whether a just-attempted flush sync actually cleared everything or
+    /// left something unsynced — still only ever written from inside this class.
+    private(set) var hasPendingLocalChanges = false
 
     init(
         syncService: SupabaseSyncService = .shared,
@@ -149,6 +151,19 @@ final class SyncCoordinator {
         self.lastSyncStore = lastSyncStore
         self.debounceInterval = debounceInterval
         self.periodicSyncInterval = periodicSyncInterval
+    }
+
+    // MARK: - Phase 6.1: local store wipe on a detected user switch
+
+    /// Called by `LocalAccountTransition.establishOwnership` immediately after it wipes the local
+    /// store for a newly-authenticated user that doesn't match the store's previous owner.
+    /// Without this, a stale `lastSuccessfulSync` could make the next `handleAppBecameActive` call
+    /// think a sync isn't needed yet even though the store was just emptied, and a stale
+    /// `hasPendingLocalChanges` would still refer to the previous user's now-deleted data.
+    func resetStateAfterLocalStoreWipe() {
+        lastSyncStore.lastSuccessfulSync = nil
+        hasPendingLocalChanges = false
+        SyncDiagnosticLog.log("resetStateAfterLocalStoreWipe — cleared lastSuccessfulSync and hasPendingLocalChanges")
     }
 
     // MARK: - Trigger 1: app active / launch

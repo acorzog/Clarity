@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import Supabase
 @testable import FinanceTracker
 
 /// Covers `RootAuthState` — the pure, dependency-free rule `RootView` uses to decide between
@@ -105,5 +106,84 @@ final class RootAuthStateTests: XCTestCase {
         let wallets = try context.fetch(FetchDescriptor<Wallet>())
         XCTAssertTrue(headCategories.isEmpty, "a signed-in startup must not seed any head categories")
         XCTAssertTrue(wallets.isEmpty, "a signed-in startup must not seed the default wallet")
+    }
+
+    // MARK: - Session lifecycle (Phase 6.0.4)
+
+    func testSignedOutBySessionInvalidationIsAlwaysSignedOut() {
+        XCTAssertEqual(RootAuthState.signedOutBySessionInvalidation, .signedOut)
+    }
+
+    /// The core Phase 6.0.4 case: a session invalidated out from under the app (revoked
+    /// server-side, or its refresh token expiring) while the app believed it was signed in must
+    /// transition back to `.signedOut`.
+    func testSessionInvalidationWhileSignedInTransitionsToSignedOut() {
+        XCTAssertTrue(RootAuthState.shouldTransitionToSignedOut(for: .signedOut, currentState: .signedIn))
+    }
+
+    /// The guard that prevents a duplicate/redundant transition from the app's own explicit
+    /// sign-out: by the time that `.signedOut` event is actually processed, `authState` has
+    /// already been flipped by `signOutAction` (synchronously, independently of this listener),
+    /// so the listener must find nothing left to do.
+    func testSignedOutEventWhileAlreadySignedOutDoesNothing() {
+        XCTAssertFalse(RootAuthState.shouldTransitionToSignedOut(for: .signedOut, currentState: .signedOut))
+    }
+
+    /// A `.signedOut` event arriving before the launch task has ever resolved `authState` past
+    /// `.loading` (not realistic in practice, but a real possible value) must also do nothing —
+    /// there is nothing to sign out of yet.
+    func testSignedOutEventWhileLoadingDoesNothing() {
+        XCTAssertFalse(RootAuthState.shouldTransitionToSignedOut(for: .signedOut, currentState: .loading))
+    }
+
+    /// Every other `AuthChangeEvent` the stream can emit must never trigger a transition — this
+    /// listener's one job is noticing an externally-invalidated session, nothing else. Covers
+    /// `.initialSession` specifically: the SDK always emits it immediately upon subscribing, so if
+    /// it were mishandled as a sign-out signal, merely starting the listener would immediately
+    /// (and incorrectly) sign out a freshly-restored session.
+    func testNonSignedOutEventsNeverTriggerATransitionEvenWhileSignedIn() {
+        let nonSignOutEvents: [AuthChangeEvent] = [
+            .initialSession, .signedIn, .tokenRefreshed, .userUpdated,
+            .passwordRecovery, .mfaChallengeVerified, .userDeleted,
+        ]
+        for event in nonSignOutEvents {
+            XCTAssertFalse(
+                RootAuthState.shouldTransitionToSignedOut(for: event, currentState: .signedIn),
+                "\(event) must never trigger a signed-out transition"
+            )
+        }
+    }
+
+    // MARK: - App Lock suggestion (biometric login discoverability)
+
+    /// The common case: biometrics are available, the user has never seen the suggestion, and the
+    /// lock isn't already on — show it.
+    func testSuggestsAppLockWhenEligible() {
+        XCTAssertTrue(
+            RootView.shouldSuggestAppLock(hasSeenSuggestion: false, lockEnabled: false, biometricsAvailable: true)
+        )
+    }
+
+    /// Shown at most once ever — never nags again on a later sign-in just because the user
+    /// declined (or accepted and later turned it back off) before.
+    func testDoesNotSuggestAppLockAfterAlreadyShown() {
+        XCTAssertFalse(
+            RootView.shouldSuggestAppLock(hasSeenSuggestion: true, lockEnabled: false, biometricsAvailable: true)
+        )
+    }
+
+    /// Already on — nothing to suggest.
+    func testDoesNotSuggestAppLockWhenAlreadyEnabled() {
+        XCTAssertFalse(
+            RootView.shouldSuggestAppLock(hasSeenSuggestion: false, lockEnabled: true, biometricsAvailable: true)
+        )
+    }
+
+    /// No Face ID/Touch ID enrolled (or unavailable on the device) — the suggestion would just be
+    /// a dead end, so it's never shown.
+    func testDoesNotSuggestAppLockWithoutBiometrics() {
+        XCTAssertFalse(
+            RootView.shouldSuggestAppLock(hasSeenSuggestion: false, lockEnabled: false, biometricsAvailable: false)
+        )
     }
 }
