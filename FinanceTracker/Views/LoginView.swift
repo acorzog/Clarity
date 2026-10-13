@@ -3,13 +3,22 @@ import SwiftUI
 /// Supabase email/password sign-in, styled to match the app's existing auth-adjacent screens
 /// (`SetPINView`, `LockScreenView`) and the Clarity design system tokens.
 struct LoginView: View {
-    var onSignedIn: () -> Void = {}
+    /// Carries the signed-in user's id (when resolvable) so `RootView.establishSignedIn` can run
+    /// its Phase 6.1 local-store ownership check — never bypassable, since this is the one path
+    /// an ordinary sign-in reaches `RootView` through.
+    var onSignedIn: (UUID?) -> Void = { _ in }
+    /// Separate from `onSignedIn` (rather than reused for both) because `RootView` needs to tell
+    /// "an existing user signed in" apart from "a brand-new account finished signing up" — only
+    /// the latter should ever seed local defaults.
+    var onSignUpCompleted: (UUID?) -> Void = { _ in }
 
     @State private var email = ""
     @State private var password = ""
     @State private var isPasswordVisible = false
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var showingSignUp = false
+    @State private var showingForgotPassword = false
 
     @FocusState private var focusedField: Field?
 
@@ -43,6 +52,20 @@ struct LoginView: View {
 
                 signInButton
 
+                VStack(spacing: ClaritySpacing.md) {
+                    Button("Forgot password?") {
+                        showingForgotPassword = true
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.textSecondary)
+
+                    Button("Don't have an account? Sign Up") {
+                        showingSignUp = true
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(LinearGradient.emeraldSky)
+                }
+
                 Spacer(minLength: ClaritySpacing.xxxl)
             }
             .padding(.horizontal, ClaritySpacing.xxl)
@@ -51,6 +74,14 @@ struct LoginView: View {
         .scrollDismissesKeyboard(.interactively)
         .animation(.easeOut(duration: 0.15), value: errorMessage)
         .preferredColorScheme(.dark)
+        .sheet(isPresented: $showingSignUp) {
+            SignUpView(onSignedIn: onSignUpCompleted) { signedUpEmail in
+                email = signedUpEmail
+            }
+        }
+        .sheet(isPresented: $showingForgotPassword) {
+            ForgotPasswordView()
+        }
     }
 
     private var header: some View {
@@ -83,6 +114,7 @@ struct LoginView: View {
             .focused($focusedField, equals: .email)
             .submitLabel(.next)
             .onSubmit { focusedField = .password }
+            .accessibilityLabel("Email")
     }
 
     private var passwordField: some View {
@@ -102,6 +134,7 @@ struct LoginView: View {
             .focused($focusedField, equals: .password)
             .submitLabel(.go)
             .onSubmit { Task { await signIn() } }
+            .accessibilityLabel("Password")
 
             Button {
                 isPasswordVisible.toggle()
@@ -147,9 +180,10 @@ struct LoginView: View {
                 email: email.trimmingCharacters(in: .whitespaces),
                 password: password
             )
-            onSignedIn()
+            let userID = try? await SupabaseAuthService.shared.currentUserID()
+            onSignedIn(userID)
         } catch {
-            errorMessage = "Couldn't sign in. Check your email and password and try again."
+            errorMessage = SupabaseAuthService.userFacingMessage(for: error, flow: .signIn)
         }
     }
 }

@@ -1046,4 +1046,49 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(uploader.callOrder.last, "entriesBatch", "entries is still the last of the six steps")
         XCTAssertNotNil(entry.remoteID, "the entry must have actually been minted and pushed, proving syncEntries truly ran, not just that onProgress fired")
     }
+
+    // MARK: - Phase 6.1 — the signal AccountView checks before a destructive sign-out
+
+    /// `AccountView.signOut()` always tries `refresh(modelContext:)` first, then checks
+    /// `hasPendingLocalChanges` to decide whether it's safe to proceed silently. This is the
+    /// success half: a flush that actually completes must clear it, so sign-out doesn't warn
+    /// unnecessarily.
+    @MainActor
+    func testPendingChangesClearAfterASuccessfulFlush() async throws {
+        let coordinator = makeCoordinator()
+        let token = observeDidSave(on: context, forwardingTo: coordinator)
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let head = try XCTUnwrap(try context.fetch(FetchDescriptor<HeadCategory>()).first)
+        let category = TestSupport.makeCategory(headCategory: head)
+        context.insert(category)
+        try context.save()
+        XCTAssertTrue(coordinator.hasPendingLocalChanges, "setup: the save above must have marked pending changes")
+
+        await coordinator.refresh(modelContext: context)
+
+        XCTAssertFalse(coordinator.hasPendingLocalChanges, "a successful flush must clear pending changes, so sign-out can proceed without a warning")
+    }
+
+    /// The failure half, and the one that actually protects against data loss: a flush attempt
+    /// that fails (offline, server error, etc.) must leave pending changes exactly as they were —
+    /// never silently cleared — so `AccountView` knows to warn before discarding them.
+    @MainActor
+    func testPendingChangesRemainAfterAFailedFlushAttempt() async throws {
+        struct PullFailure: Error {}
+        downloader.errorToThrow = PullFailure()
+        let coordinator = makeCoordinator()
+        let token = observeDidSave(on: context, forwardingTo: coordinator)
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let head = try XCTUnwrap(try context.fetch(FetchDescriptor<HeadCategory>()).first)
+        let category = TestSupport.makeCategory(headCategory: head)
+        context.insert(category)
+        try context.save()
+        XCTAssertTrue(coordinator.hasPendingLocalChanges, "setup: the save above must have marked pending changes")
+
+        await coordinator.refresh(modelContext: context)
+
+        XCTAssertTrue(coordinator.hasPendingLocalChanges, "a sync attempt that fails must leave pending changes exactly as they were — never silently discarded")
+    }
 }

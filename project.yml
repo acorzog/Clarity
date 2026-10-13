@@ -82,8 +82,13 @@ targets:
       properties:
         com.apple.security.application-groups:
           - group.com.andreacorzo.FinanceTracker.dev
+    # Its own Info.plist, distinct from the main FinanceTracker target's (FinanceTracker/Info.plist)
+    # — both targets previously pointed `info.path` at the same shared file, so xcodegen generate
+    # would merge each target's `CFBundleURLTypes` into it in turn and the last one processed won,
+    # silently overwriting the other target's custom URL scheme (see Info-Dev.plist's own comment
+    # for the full story). Each target now owns a physically separate plist so this can't recur.
     info:
-      path: FinanceTracker/Info.plist
+      path: FinanceTracker/Info-Dev.plist
       properties:
         CFBundleURLTypes:
           - CFBundleURLName: com.andreacorzo.FinanceTracker.dev
@@ -120,6 +125,13 @@ targets:
     sources:
       - path: FinanceTrackerWidgets
       - path: FinanceTracker/Models
+        # Ask Clarity's engine and its optional Anthropic fallback depend on Services/ types
+        # (CategorizationService, networking) that aren't part of this target — excluded rather
+        # than moved, since the widget never needs natural-language queries, only the models
+        # above this exclusion list.
+        excludes:
+          - "AskClarity*"
+          - "AnthropicClaritySemanticProvider.swift"
       - path: FinanceTracker/Views/Theme.swift
       - path: FinanceTracker/Services/SharedModelContainer.swift
       # Design-system tokens only (not Components/) — BudgetGaugeWidgetView needs the shared

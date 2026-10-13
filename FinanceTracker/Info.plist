@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The main FinanceTracker target's Info.plist — FinanceTrackerDev has its own, separate
+     Info-Dev.plist in this same directory; see its comment for why they must stay separate. -->
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
@@ -20,10 +22,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.andreacorzo.FinanceTracker.dev</string>
+			<string>com.andreacorzo.FinanceTracker</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>financetrackerdev</string>
+				<string>financetracker</string>
 			</array>
 		</dict>
 	</array>
