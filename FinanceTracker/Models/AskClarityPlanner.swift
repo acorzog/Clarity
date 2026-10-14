@@ -85,6 +85,10 @@ enum AskClarityPlanOperation: Equatable {
     case categoryBreakdown
     /// The same metric/subject computed across several consecutive equivalent periods.
     case trend
+    /// The current period's figure against the average of the consecutive equivalent periods
+    /// immediately before it ("compared to my average over the last 6 months") — reuses the
+    /// exact same period chain `.trend` builds; only the final composition differs.
+    case trendAverageComparison
     /// "Which day did I spend the most on restaurants?" — spending bucketed by calendar day within
     /// the period, optionally scoped to one category/head-category subject, ranked highest/lowest.
     case rankDays
@@ -221,6 +225,16 @@ enum AskClarityPlanner {
         // 6/7. Why / reduce-advice — not yet planned.
         if query.wantsWhyExplanation, resolvedCategory == nil { return .legacyFallback }
         if query.wantsReduceAdvice { return .legacyFallback }
+
+        // 7a-0. "Compared to my average over the last 6 months" — checked before the plain trend
+        //       list (7a) since both recognize the identical "last N periods" phrasing; this one
+        //       additionally named "average"/"usual"/"typical" and asks for a comparison against
+        //       that average, not a list of the points themselves.
+        if query.wantsAverageComparison {
+            let metric = query.metric ?? .spending
+            let subjects: [AskClaritySubject] = resolvedSubject.map { [$0] } ?? []
+            return .plan(AskClarityPlan(operation: .trendAverageComparison, metric: metric, subjects: subjects, period: period, comparison: nil, ranking: nil, trendSpan: query.trendSpan))
+        }
 
         // 7a. Trend questions ("spending trend," "how has my income trended the last 6
         //     months") — checked before the plain-amount/breakdown cases below since a trend

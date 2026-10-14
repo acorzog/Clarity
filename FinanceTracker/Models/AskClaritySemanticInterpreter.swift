@@ -23,6 +23,13 @@ enum AskClaritySemanticOutcome: Equatable {
     case understood(AskClaritySemanticInterpretation)
     case unsupported
     case needsClarification
+    /// Two independently-valid interpretations from one response — produced only by two parallel
+    /// tool calls in a single Anthropic reply (see `AnthropicClaritySemanticProvider`/
+    /// `AskClarityToolUseResponseParser`), never by two separate network calls. Order carries no
+    /// meaning; `AskClaritySemanticComposition` is the only place that assigns roles (which one is
+    /// the single period, which one is the trend) and is also the only place that recognizes this
+    /// case — this is the sole two-step shape Phase 1 supports.
+    case composed(AskClaritySemanticInterpretation, AskClaritySemanticInterpretation)
 }
 
 /// The tiny, fully-validated slice of `AskClarityQuery` a semantic interpretation is allowed to
@@ -270,6 +277,11 @@ struct AskClaritySemanticLimits {
     var maxOutputTokens = 300
     /// Calls allowed per `AskClaritySemanticCallBudget` instance — see its own doc comment.
     var maxCallsPerSession = 20
+    /// Hard cap on tool calls Claude may make in a single classification response — the one
+    /// two-step shape Phase 1 recognizes (`AskClaritySemanticOutcome.composed`) needs exactly two;
+    /// never more. Enforced by `AskClarityToolUseResponseParser.parse`, independent of whatever
+    /// `tool_choice`/`disable_parallel_tool_use` the request itself sets.
+    var maxToolCallsPerQuestion = 2
 
     static let `default` = AskClaritySemanticLimits()
 }
@@ -285,9 +297,12 @@ struct AskClaritySemanticLimits {
 final class AskClaritySemanticCallBudget {
     private let maxCalls: Int
     private(set) var callsMade = 0
+    private let maxCompositionFailures: Int
+    private(set) var compositionFailures = 0
 
-    init(maxCalls: Int = AskClaritySemanticLimits.default.maxCallsPerSession) {
+    init(maxCalls: Int = AskClaritySemanticLimits.default.maxCallsPerSession, maxCompositionFailures: Int = 3) {
         self.maxCalls = maxCalls
+        self.maxCompositionFailures = maxCompositionFailures
     }
 
     var hasRemainingCalls: Bool { callsMade < maxCalls }
@@ -297,4 +312,13 @@ final class AskClaritySemanticCallBudget {
     /// counts against the budget rather than letting a persistently-failing provider be retried
     /// forever across a long session.
     func recordCall() { callsMade += 1 }
+
+    /// Once a session has seen this many `.composed` outcomes that didn't resolve to the one
+    /// recognized two-step shape (see `AskClaritySemanticComposition`), Phase 1 stops attempting
+    /// the composed path for the rest of the session — a `.composed` outcome degrades to its
+    /// first interpretation alone instead. Never a retry of the same question; this only caps how
+    /// many *separate* questions keep paying the composition-parsing cost in a session where it
+    /// keeps not panning out.
+    var compositionAllowed: Bool { compositionFailures < maxCompositionFailures }
+    func recordCompositionFailure() { compositionFailures += 1 }
 }

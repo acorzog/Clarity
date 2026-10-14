@@ -298,6 +298,8 @@ enum AskClarityEngine {
             return respondToCategoryBreakdown(plan: plan, execution: execution, context: context)
         case .trend:
             return respondToTrend(plan: plan, execution: execution, context: context)
+        case .trendAverageComparison:
+            return respondToTrendAverageComparison(plan: plan, execution: execution, context: context)
         case .rankDays:
             return respondToDayRanking(plan: plan, execution: execution, context: context)
         }
@@ -546,6 +548,85 @@ enum AskClarityEngine {
         case .remainingBudget: return "remaining budget"
         case .savings: return "savings"
         }
+    }
+
+    // MARK: - Respond (trend average comparison)
+
+    /// "Compared to my average over the last 6 months" — the current period's figure against the
+    /// average of the consecutive equivalent periods right before it. Every figure comes from
+    /// `AskClarityExecutor.executeTrendAverageComparison` (itself just `executeAmount` +
+    /// `executeTrend`, reused verbatim); the comparison arithmetic itself comes from
+    /// `AskClarityTrendAverageComparison.compute`, shared with the semantic-fallback composition
+    /// so there's exactly one definition of "average the history, then compare." Insufficient
+    /// history and a zero average are each reported with their own honest, explicit sentence —
+    /// never a fabricated percentage, never silently falling through to a generic answer.
+    private static func respondToTrendAverageComparison(plan: AskClarityPlan, execution: AskClarityExecutionResult, context: AskClaritySessionContext) -> Result {
+        guard case .trendAverageComparison(let current, let hasData, let historicalPoints) = execution, hasData else {
+            return Result(answer: AskClarityAnswer(headline: "I couldn't resolve that period.", hasSufficientData: false), updatedContext: context)
+        }
+
+        let subject = plan.subjects.first
+        let noun = metricNoun(for: plan.metric)
+        let headline: String
+        if let subject {
+            headline = "You spent \(current.currencyFormatted) on \(subject.name) \(plan.period.label)."
+        } else {
+            switch plan.metric {
+            case .spending: headline = "You spent \(current.currencyFormatted) \(plan.period.label)."
+            case .income: headline = "You received \(current.currencyFormatted) in income \(plan.period.label)."
+            case .remainingBudget:
+                headline = current >= 0
+                    ? "You have \(current.currencyFormatted) left to spend \(plan.period.label)."
+                    : "You've gone \(abs(current).currencyFormatted) over what's available \(plan.period.label)."
+            case .savings: headline = "You've moved \(current.currencyFormatted) into savings \(plan.period.label)."
+            }
+        }
+
+        // The question's own requested window — "the last 6 periods" implies 5 historical points
+        // are required, not some unrelated fixed constant. Defaults to 2 (matching `.trend`'s own
+        // default span of 3) when no explicit span was named. This is also what keeps the answer
+        // honest about the window actually used: `compute` only ever succeeds with *at least*
+        // this many historical points, so the reported `periodsAveraged` never quietly falls short
+        // of what the question asked for while still being presented as if it had.
+        let requiredHistoricalPeriods = max((plan.trendSpan ?? 3) - 1, 1)
+
+        guard let comparison = AskClarityTrendAverageComparison.compute(
+            currentAmount: current, currentPeriodLabel: plan.period.label, historicalPoints: historicalPoints, minimumPeriods: requiredHistoricalPeriods
+        ) else {
+            let periodWord = requiredHistoricalPeriods == 1 ? "period" : "periods"
+            return Result(
+                answer: AskClarityAnswer(
+                    headline: headline,
+                    supportingDetail: "I don't have enough history yet to say what's average — I need at least \(requiredHistoricalPeriods) full \(periodWord) logged before \(plan.period.label).",
+                    hasSufficientData: true
+                ),
+                updatedContext: context
+            )
+        }
+
+        guard let percent = comparison.percentDifference else {
+            // `average == 0` — every one of the historical periods had nothing logged. A real,
+            // honest answer, never a fabricated "0%" or "∞%".
+            return Result(
+                answer: AskClarityAnswer(
+                    headline: headline,
+                    supportingDetail: "There was no \(noun)\(subject.map { " on \($0.name)" } ?? "") logged in any of the \(comparison.periodsAveraged) periods before \(plan.period.label), so there's no average to compare to.",
+                    hasSufficientData: true
+                ),
+                updatedContext: context
+            )
+        }
+
+        let word = comparison.isHigher ? "more" : "less"
+        let magnitude = abs(percent).formatted(.percent.precision(.fractionLength(0)))
+        let detail = "\(comparison.absoluteDifference.currencyFormatted) \(word) than your \(comparison.average.currencyFormatted) average over the \(comparison.periodsAveraged) periods before that (\(magnitude) \(word))."
+        let isFavorable: Bool? = plan.metric == .spending ? !comparison.isHigher : (plan.metric == .income ? comparison.isHigher : nil)
+        let updated = subject?.singleCategory.map { updatedContext(from: context, category: $0, metric: plan.metric, period: plan.period, value: current) } ?? context
+
+        return Result(
+            answer: AskClarityAnswer(headline: headline, supportingDetail: detail, hasSufficientData: true, comparisonIsFavorable: isFavorable),
+            updatedContext: updated
+        )
     }
 
     /// "Did I spend more on restaurants than groceries?" — a direct yes/no framed around

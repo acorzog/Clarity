@@ -175,6 +175,11 @@ struct AskClarityQuery: Equatable {
     /// when `wantsTrend` came from a bare keyword ("trend," "month by month") with no number
     /// named, letting `AskClarityExecutor` fall back to its own default span.
     var trendSpan: Int?
+    /// "Compared to my average over the last 6 months," "is this normal for groceries" — asks for
+    /// the current period's figure *against* its own trailing average, not just a list of past
+    /// periods (`wantsTrend` alone). Always implies `wantsTrend` (set only alongside it, from the
+    /// same "last N periods" phrasing) — see `AskClarityInterpreter.parseAverageComparison`.
+    var wantsAverageComparison = false
     /// "that," "it," "this category" — a pronoun standing in for the previous turn's subject.
     var usedContextualReference = false
     /// True when nothing about this question stands on its own (no metric/ranking/direction/
@@ -265,6 +270,9 @@ enum AskClarityInterpreter {
         if query.periodMatch == nil, let unit = trendMatch.unit {
             query.periodMatch = .supported(unit == "week" ? AskClarityPeriod(kind: .thisWeek, label: "this week") : AskClarityPeriod(kind: .thisMonth, label: "this month"))
         }
+        // Only meaningful alongside a trend request — "average" alone, with no "last N periods"
+        // or trend cue anywhere in the question, has no chain to average over.
+        query.wantsAverageComparison = query.wantsTrend && parseAverageComparison(normalized)
 
         let usedContextualReference = parseContextualReference(normalized)
         query.usedContextualReference = usedContextualReference
@@ -278,7 +286,7 @@ enum AskClarityInterpreter {
         let isMinimalFollowUp = query.metric == nil && query.ranking == nil && query.direction == nil
             && query.budgetState == nil && !query.wantsWhyExplanation && !query.wantsReduceAdvice
             && !query.wantsAssessment && !query.wantsList && !query.wantsChangeSummary
-            && !query.wantsBreakdown && !query.wantsTrend && !query.wantsDayRanking
+            && !query.wantsBreakdown && !query.wantsTrend && !query.wantsDayRanking && !query.wantsAverageComparison
         query.isMinimalFollowUp = isMinimalFollowUp
         let shouldInheritContext = usedContextualReference || isMinimalFollowUp
 
@@ -737,6 +745,16 @@ enum AskClarityInterpreter {
             return (true, nil, nil)
         }
         return (false, nil, nil)
+    }
+
+    /// Words that turn a plain trend request ("the last 6 months") into a comparison against
+    /// that trend's own average, rather than just a list of its points — "compared to my
+    /// *average*," "is this *normal*/*usual*/*typical* for groceries." Narrow and literal, like
+    /// every other keyword list in this file — never a sentiment/intent classifier.
+    private static let averageComparisonPhrases = ["average", "usual", "usually", "typical", "typically", "normal", "normally"]
+
+    private static func parseAverageComparison(_ text: String) -> Bool {
+        containsAny(text, averageComparisonPhrases)
     }
 
     private static func parseContextualReference(_ text: String) -> Bool {

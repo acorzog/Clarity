@@ -68,18 +68,27 @@ private final class StubSemanticProvider: AskClaritySemanticProviding {
     }
 }
 
-// MARK: - Response parsing (malformed/invalid LLM output)
+// MARK: - Tool-use response parsing (malformed/invalid/adversarial model output)
 
-final class AskClaritySemanticResponseParserTests: XCTestCase {
-    func testValidJSONParsesEveryField() {
-        let json = """
-        {"result":"understood","metric":"spending","categoryName":"Restaurants",\
-        "period":{"kind":"named","value":"thisMonth"},"ranking":null,"budgetState":null,\
-        "wantsBreakdown":false,"wantsTrend":false,"trendSpan":null,"wantsList":false,\
-        "wantsTransactionRanking":false,"wantsAssessment":false,"comparisonRequested":true}
-        """
-        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
-            return XCTFail("valid JSON should parse to .understood")
+/// Builds the exact Decodable shape a live Anthropic tool-use response takes, from a terse test
+/// DSL — one `(name, inputJSON)` pair per `tool_use` block Claude is simulated to have made.
+private func toolUseResponse(stopReason: String = "tool_use", calls: [(name: String, input: String)]) -> AskClarityToolUseMessagesResponse {
+    let blocks = calls.map { "{\"type\":\"tool_use\",\"name\":\"\($0.name)\",\"input\":\($0.input)}" }.joined(separator: ",")
+    let json = "{\"stop_reason\":\"\(stopReason)\",\"content\":[\(blocks)]}"
+    return try! JSONDecoder().decode(AskClarityToolUseMessagesResponse.self, from: Data(json.utf8))
+}
+
+final class AskClarityToolUseResponseParserTests: XCTestCase {
+    func testOneUnderstoodCallParsesEveryField() {
+        let response = toolUseResponse(calls: [(
+            "classify_understood_question",
+            """
+            {"metric":"spending","categoryName":"Restaurants","period":{"kind":"named","value":"thisMonth"},\
+            "comparisonRequested":true}
+            """
+        )])
+        guard case .understood(let result) = AskClarityToolUseResponseParser.parse(response) else {
+            return XCTFail("a single classify_understood_question call should parse to .understood")
         }
         XCTAssertEqual(result.metric, .spending)
         XCTAssertEqual(result.categoryName, "Restaurants")
@@ -87,57 +96,60 @@ final class AskClaritySemanticResponseParserTests: XCTestCase {
         XCTAssertTrue(result.comparisonRequested)
     }
 
-    func testSurroundingProseAroundTheJSONObjectIsIgnored() {
-        // Mirrors `CategorizationService.parseExtraction`'s own tolerance for a model that adds
-        // stray text around the JSON despite being asked not to.
-        let text = "Sure, here you go:\n{\"result\":\"understood\",\"metric\":\"income\"} — hope that helps!"
-        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(text) else {
-            return XCTFail("should still parse to .understood")
-        }
-        XCTAssertEqual(result.metric, .income)
+    func testNoToolCallsAtAllReturnsNil() {
+        // Should never happen with `tool_choice: {"type":"any"}`, but a provider that still
+        // replies with plain text instead of a tool call must fail safe, not crash.
+        let response = toolUseResponse(calls: [])
+        XCTAssertNil(AskClarityToolUseResponseParser.parse(response))
     }
 
-    func testCompletelyNonJSONTextReturnsNil() {
-        XCTAssertNil(AskClaritySemanticResponseParser.parse("I'm not sure how to answer that."))
+    func testUnsupportedCallAloneReturnsUnsupported() {
+        let response = toolUseResponse(calls: [("classify_unsupported_question", "{}")])
+        XCTAssertEqual(AskClarityToolUseResponseParser.parse(response), .unsupported)
     }
 
-    func testEmptyStringReturnsNil() {
-        XCTAssertNil(AskClaritySemanticResponseParser.parse(""))
+    func testNeedsClarificationCallAloneReturnsNeedsClarification() {
+        let response = toolUseResponse(calls: [("classify_needs_clarification", "{}")])
+        XCTAssertEqual(AskClarityToolUseResponseParser.parse(response), .needsClarification)
     }
 
-    func testTruncatedJSONReturnsNil() {
-        XCTAssertNil(AskClaritySemanticResponseParser.parse("{\"result\":\"understood\",\"metric\":\"spend"))
+    /// A hallucinated tool name outside the fixed three-tool catalog — never trusted, even if
+    /// `input` happens to decode cleanly; the whole response is discarded.
+    func testUnknownToolNameReturnsNil() {
+        let response = toolUseResponse(calls: [("delete_all_transactions", "{}")])
+        XCTAssertNil(AskClarityToolUseResponseParser.parse(response))
     }
 
-    func testMissingRequiredResultFieldReturnsNil() {
-        XCTAssertNil(AskClaritySemanticResponseParser.parse("{\"metric\":\"spending\"}"))
+    /// `classify_unsupported_question`/`classify_needs_clarification` must never be mixed with
+    /// another call in the same response — each is only ever a sole, terminal classification.
+    func testUnsupportedMixedWithAnotherCallReturnsNil() {
+        let response = toolUseResponse(calls: [
+            ("classify_unsupported_question", "{}"),
+            ("classify_understood_question", "{\"metric\":\"spending\"}")
+        ])
+        XCTAssertNil(AskClarityToolUseResponseParser.parse(response))
     }
 
-    func testResultUnsupportedIgnoresEveryOtherField() {
-        // Even if a model sets result=unsupported but still fills in other fields (contradictory
-        // output), the parser must not act on any of them — `.unsupported` carries no fields at all.
-        let json = "{\"result\":\"unsupported\",\"metric\":\"spending\",\"categoryName\":\"Anything\"}"
-        XCTAssertEqual(AskClaritySemanticResponseParser.parse(json), .unsupported)
+    func testUnsupportedMixedWithNeedsClarificationReturnsNil() {
+        let response = toolUseResponse(calls: [
+            ("classify_unsupported_question", "{}"),
+            ("classify_needs_clarification", "{}")
+        ])
+        XCTAssertNil(AskClarityToolUseResponseParser.parse(response))
     }
 
-    /// The new three-way outcome this phase adds: an in-scope-but-ambiguous question must produce
-    /// its own distinct result, never silently folded into `.unsupported` or a guessed `.understood`.
-    func testResultNeedsClarificationIsReturnedAsItsOwnDistinctOutcome() {
-        let json = "{\"result\":\"needsClarification\",\"metric\":\"spending\"}"
-        XCTAssertEqual(AskClaritySemanticResponseParser.parse(json), .needsClarification)
+    /// A `max_tokens` stop means a tool's `input` may have been truncated mid-generation — never
+    /// trust a possibly-partial classification, even if what arrived happens to decode cleanly.
+    func testMaxTokensStopReasonReturnsNilEvenWithAnOtherwiseValidCall() {
+        let response = toolUseResponse(stopReason: "max_tokens", calls: [("classify_understood_question", "{\"metric\":\"spending\"}")])
+        XCTAssertNil(AskClarityToolUseResponseParser.parse(response))
     }
 
-    /// A hallucinated "result" value outside the fixed three — never guessed at; treated exactly
-    /// like a provider failure (nil), not defaulted to any of the three real outcomes.
-    func testUnrecognizedResultValueReturnsNilRatherThanGuessingAnOutcome() {
-        XCTAssertNil(AskClaritySemanticResponseParser.parse("{\"result\":\"maybe\"}"))
-    }
-
-    /// A hallucinated enum value outside the vocabulary given in the prompt — must be dropped
+    /// A hallucinated enum value outside the vocabulary given in the schema — must be dropped
     /// (treated as "not mentioned"), never passed through as if it were real.
     func testUnrecognizedEnumValueIsDroppedNotGuessed() {
-        let json = "{\"result\":\"understood\",\"metric\":\"cryptocurrency\",\"ranking\":\"medium\"}"
-        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
+        let response = toolUseResponse(calls: [("classify_understood_question", "{\"metric\":\"cryptocurrency\",\"ranking\":\"medium\"}")])
+        guard case .understood(let result) = AskClarityToolUseResponseParser.parse(response) else {
             return XCTFail("should still parse — just with the bad fields dropped")
         }
         XCTAssertNil(result.metric)
@@ -145,24 +157,16 @@ final class AskClaritySemanticResponseParserTests: XCTestCase {
     }
 
     func testUnrecognizedPeriodKindIsDropped() {
-        let json = "{\"result\":\"understood\",\"period\":{\"kind\":\"nextDecade\",\"value\":\"today\"}}"
-        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
-            return XCTFail("should still parse")
-        }
-        XCTAssertNil(result.period)
-    }
-
-    func testNamedPeriodWithMissingValueIsDropped() {
-        let json = "{\"result\":\"understood\",\"period\":{\"kind\":\"named\"}}"
-        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
+        let response = toolUseResponse(calls: [("classify_understood_question", "{\"period\":{\"kind\":\"nextDecade\",\"value\":\"today\"}}")])
+        guard case .understood(let result) = AskClarityToolUseResponseParser.parse(response) else {
             return XCTFail("should still parse")
         }
         XCTAssertNil(result.period)
     }
 
     func testDateRangePeriodParsesBothDates() {
-        let json = "{\"result\":\"understood\",\"period\":{\"kind\":\"dateRange\",\"startDate\":\"2025-09-05\",\"endDate\":\"2025-09-18\"}}"
-        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json), case .dateRange(let start, let end) = result.period else {
+        let response = toolUseResponse(calls: [("classify_understood_question", "{\"period\":{\"kind\":\"dateRange\",\"startDate\":\"2025-09-05\",\"endDate\":\"2025-09-18\"}}")])
+        guard case .understood(let result) = AskClarityToolUseResponseParser.parse(response), case .dateRange(let start, let end) = result.period else {
             return XCTFail("should parse a dateRange period")
         }
         XCTAssertEqual(start, "2025-09-05")
@@ -170,19 +174,59 @@ final class AskClaritySemanticResponseParserTests: XCTestCase {
     }
 
     func testTrendSpanIsClampedToASaneRange() {
-        let json = "{\"result\":\"understood\",\"wantsTrend\":true,\"trendSpan\":9999}"
-        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
+        let response = toolUseResponse(calls: [("classify_understood_question", "{\"wantsTrend\":true,\"trendSpan\":9999}")])
+        guard case .understood(let result) = AskClarityToolUseResponseParser.parse(response) else {
             return XCTFail("should still parse")
         }
         XCTAssertEqual(result.trendSpan, 24)
     }
 
     func testEmptyCategoryNameIsTreatedAsNilNotAnEmptyMatch() {
-        let json = "{\"result\":\"understood\",\"categoryName\":\"   \"}"
-        guard case .understood(let result) = AskClaritySemanticResponseParser.parse(json) else {
+        let response = toolUseResponse(calls: [("classify_understood_question", "{\"categoryName\":\"   \"}")])
+        guard case .understood(let result) = AskClarityToolUseResponseParser.parse(response) else {
             return XCTFail("should still parse")
         }
         XCTAssertNil(result.categoryName)
+    }
+
+    // MARK: Two-step composition (the one new multi-call shape this phase adds)
+
+    func testTwoValidUnderstoodCallsParseToComposed() {
+        let response = toolUseResponse(calls: [
+            ("classify_understood_question", "{\"metric\":\"spending\",\"categoryName\":\"Restaurants\",\"period\":{\"kind\":\"named\",\"value\":\"thisMonth\"}}"),
+            ("classify_understood_question", "{\"metric\":\"spending\",\"categoryName\":\"Restaurants\",\"wantsTrend\":true,\"trendSpan\":6}")
+        ])
+        guard case .composed(let first, let second) = AskClarityToolUseResponseParser.parse(response) else {
+            return XCTFail("two valid classify_understood_question calls should parse to .composed")
+        }
+        XCTAssertTrue([first, second].contains { $0.wantsTrend && $0.trendSpan == 6 })
+        XCTAssertTrue([first, second].contains { !$0.wantsTrend })
+    }
+
+    /// Enforces the hard architectural cap — never more than `maxToolCallsPerQuestion` (2) tool
+    /// calls are ever acted on, no matter how many a provider sends.
+    func testThreeToolCallsExceedsTheLimitAndReturnsNil() {
+        let response = toolUseResponse(calls: [
+            ("classify_understood_question", "{\"metric\":\"spending\"}"),
+            ("classify_understood_question", "{\"metric\":\"income\"}"),
+            ("classify_understood_question", "{\"metric\":\"savings\"}")
+        ])
+        XCTAssertNil(AskClarityToolUseResponseParser.parse(response))
+    }
+
+    /// If either of the two calls fails to validate, the whole response is discarded — never
+    /// partially trust the one call that did parse alongside a discarded invalid one.
+    func testTwoCallsWhereOneHasOnlyInvalidFieldsStillParsesSinceEveryFieldIsOptional() {
+        // Every field on `classify_understood_question` is optional, so an "empty" call is still
+        // a *valid* (if empty) interpretation — this is intentionally distinct from a truly
+        // malformed/undecodable input, which the JSONDecoder step itself would reject outright.
+        let response = toolUseResponse(calls: [
+            ("classify_understood_question", "{\"metric\":\"spending\"}"),
+            ("classify_understood_question", "{}")
+        ])
+        guard case .composed = AskClarityToolUseResponseParser.parse(response) else {
+            return XCTFail("two structurally-valid (if one is empty) calls should still compose")
+        }
     }
 }
 
@@ -320,22 +364,21 @@ final class AskClaritySemanticQueryBuilderTests: XCTestCase {
     }
 }
 
-// MARK: - Request building (no financial data ever sent; deterministic decoding)
+// MARK: - Tool-use request building (no financial data ever sent; deterministic decoding)
 
-final class AskClaritySemanticRequestBuilderTests: XCTestCase {
+final class AskClarityToolUseRequestBuilderTests: XCTestCase {
     func testRequestBodyContainsNoFinancialAmounts() throws {
         let context = AskClaritySemanticContext(question: "How much did I spend on restaurants?", today: today, availableCategoryNames: ["Restaurants", "Groceries"])
-        guard let data = AskClaritySemanticRequestBuilder.requestBody(context: context, model: "claude-haiku-4-5-20251001", limits: .default) else {
+        guard let data = AskClarityToolUseRequestBuilder.requestBody(context: context, model: "claude-haiku-4-5-20251001", limits: .default) else {
             return XCTFail("should build a request body")
         }
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-        // The request is entirely text (question + category names + vocabulary instructions) —
+        // The request is entirely text/schema (question + category names + tool definitions) —
         // there is no numeric amount field in the wire format at all (enforced by
         // `AskClaritySemanticContext`'s own type, which has no such field to serialize), so this
-        // is really pinning the shape rather than scanning for a stray number. "Budget" itself
-        // legitimately appears as part of the "budgetState" vocabulary description, so that's not
-        // a leak — `Entry`/`Decimal`, which would only ever appear from an accidental change that
-        // started serializing real transaction data, are the actual red flags checked here.
+        // is really pinning the shape rather than scanning for a stray number. `Entry`/`Decimal`,
+        // which would only ever appear from an accidental change that started serializing real
+        // transaction data, are the actual red flags checked here.
         XCTAssertTrue(json.contains("Restaurants"))
         XCTAssertTrue(json.contains("claude-haiku-4-5-20251001"))
         XCTAssertFalse(json.contains("Entry"))
@@ -345,26 +388,36 @@ final class AskClaritySemanticRequestBuilderTests: XCTestCase {
     /// Determinism requirement: decoding must be as close to deterministic as the API allows.
     func testRequestBodyUsesZeroTemperatureForDeterministicDecoding() throws {
         let context = AskClaritySemanticContext(question: "test", today: today, availableCategoryNames: [])
-        let data = try XCTUnwrap(AskClaritySemanticRequestBuilder.requestBody(context: context, model: "m", limits: .default))
+        let data = try XCTUnwrap(AskClarityToolUseRequestBuilder.requestBody(context: context, model: "m", limits: .default))
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
         XCTAssertTrue(json.contains("\"temperature\":0"), json)
     }
 
-    /// The prompt itself must state the fixed word rules this phase adds — belt-and-suspenders
-    /// alongside the code-level override in `AskClaritySemanticAmbiguityRules`.
-    func testInstructionsDefineAFixedMappingForRecentlyLatelyAndRecent() {
-        let instructions = AskClaritySemanticRequestBuilder.instructions
+    /// This phase's whole point: classification must be expressed as native Anthropic tool use,
+    /// not a free-text JSON contract — pin the actual wire fields that make it so.
+    func testRequestBodyDeclaresTheThreeToolCatalogAndForcesAToolCall() throws {
+        let context = AskClaritySemanticContext(question: "test", today: today, availableCategoryNames: [])
+        let data = try XCTUnwrap(AskClarityToolUseRequestBuilder.requestBody(context: context, model: "m", limits: .default))
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual((body["tool_choice"] as? [String: String])?["type"], "any")
+        let tools = try XCTUnwrap(body["tools"] as? [[String: Any]])
+        let names = Set(tools.compactMap { $0["name"] as? String })
+        XCTAssertEqual(names, ["classify_understood_question", "classify_unsupported_question", "classify_needs_clarification"])
+        // Every tool declares a schema that forbids fields outside its own vocabulary.
+        for tool in tools {
+            let schema = try XCTUnwrap(tool["input_schema"] as? [String: Any])
+            XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
+        }
+    }
+
+    /// The prompt itself must state the fixed word rules a JSON Schema can't express — belt-and-
+    /// suspenders alongside the code-level override in `AskClaritySemanticAmbiguityRules`.
+    func testSystemPromptDefinesAFixedMappingForRecentlyLatelyAndRecent() {
+        let instructions = AskClarityToolUseRequestBuilder.systemPrompt
         XCTAssertTrue(instructions.contains("\"recently\""))
         XCTAssertTrue(instructions.contains("\"lately\""))
         XCTAssertTrue(instructions.contains("\"recent\""))
         XCTAssertTrue(instructions.contains("thisWeek"))
-    }
-
-    func testInstructionsDefineTheThreeWayResultVocabularyIncludingNeedsClarification() {
-        let instructions = AskClaritySemanticRequestBuilder.instructions
-        XCTAssertTrue(instructions.contains("needsClarification"))
-        XCTAssertTrue(instructions.contains("unsupported"))
-        XCTAssertTrue(instructions.contains("understood"))
     }
 
     func testQuestionLongerThanTheLimitIsTruncated() throws {
@@ -372,7 +425,7 @@ final class AskClaritySemanticRequestBuilderTests: XCTestCase {
         var limits = AskClaritySemanticLimits.default
         limits.maxQuestionLength = 50
         let context = AskClaritySemanticContext(question: longQuestion, today: today, availableCategoryNames: [])
-        let data = try XCTUnwrap(AskClaritySemanticRequestBuilder.requestBody(context: context, model: "m", limits: limits))
+        let data = try XCTUnwrap(AskClarityToolUseRequestBuilder.requestBody(context: context, model: "m", limits: limits))
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
         XCTAssertFalse(json.contains(String(repeating: "a", count: 51)))
     }
@@ -381,7 +434,7 @@ final class AskClaritySemanticRequestBuilderTests: XCTestCase {
         var limits = AskClaritySemanticLimits.default
         limits.maxCategoryNames = 2
         let context = AskClaritySemanticContext(question: "test", today: today, availableCategoryNames: ["One", "Two", "Three", "Four"])
-        let data = try XCTUnwrap(AskClaritySemanticRequestBuilder.requestBody(context: context, model: "m", limits: limits))
+        let data = try XCTUnwrap(AskClarityToolUseRequestBuilder.requestBody(context: context, model: "m", limits: limits))
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
         XCTAssertTrue(json.contains("One"))
         XCTAssertTrue(json.contains("Two"))
@@ -393,7 +446,7 @@ final class AskClaritySemanticRequestBuilderTests: XCTestCase {
         var limits = AskClaritySemanticLimits.default
         limits.maxOutputTokens = 123
         let context = AskClaritySemanticContext(question: "test", today: today, availableCategoryNames: [])
-        let data = try XCTUnwrap(AskClaritySemanticRequestBuilder.requestBody(context: context, model: "m", limits: limits))
+        let data = try XCTUnwrap(AskClarityToolUseRequestBuilder.requestBody(context: context, model: "m", limits: limits))
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
         XCTAssertTrue(json.contains("\"max_tokens\":123"))
     }
@@ -414,6 +467,247 @@ final class AskClaritySemanticCallBudgetTests: XCTestCase {
     func testZeroMaxCallsNeverAllowsACall() {
         let budget = AskClaritySemanticCallBudget(maxCalls: 0)
         XCTAssertFalse(budget.hasRemainingCalls)
+    }
+
+    func testCompositionAllowedBecomesFalseOnceFailuresReachTheLimit() {
+        let budget = AskClaritySemanticCallBudget(maxCompositionFailures: 2)
+        XCTAssertTrue(budget.compositionAllowed)
+        budget.recordCompositionFailure()
+        XCTAssertTrue(budget.compositionAllowed)
+        budget.recordCompositionFailure()
+        XCTAssertFalse(budget.compositionAllowed)
+    }
+
+    func testZeroMaxCompositionFailuresNeverAllowsComposition() {
+        let budget = AskClaritySemanticCallBudget(maxCompositionFailures: 0)
+        XCTAssertFalse(budget.compositionAllowed)
+    }
+}
+
+// MARK: - Semantic composition (the two-step "current vs. trailing average" shape)
+
+final class AskClaritySemanticCompositionTests: XCTestCase {
+    /// The canonical motivating example: "compare this month's dining to the last 6 months."
+    func testCurrentAmountComparedAgainstTrendAverageProducesACorrectComposedAnswer() async {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
+        // Five historical months at 100, plus the current month (June) at 300 — a clear anomaly.
+        var entries: [Entry] = []
+        for monthOffset in 1...5 {
+            let date = Calendar.current.date(byAdding: .month, value: -monthOffset, to: testDate(2025, 6, 15))!
+            entries.append(TestSupport.makeEntry(amount: 100, date: date, type: .expense, category: restaurants, wallet: wallet))
+        }
+        entries.append(TestSupport.makeEntry(amount: 300, date: testDate(2025, 6, 10), type: .expense, category: restaurants, wallet: wallet))
+        context.insert(wallet); context.insert(head); context.insert(restaurants)
+        entries.forEach { context.insert($0) }
+
+        let current = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let trend = blankInterpretation(metric: .spending, categoryName: "Restaurants", wantsTrend: true, trendSpan: 6)
+
+        let result = AskClaritySemanticComposition.respond(
+            first: current, second: trend, question: "compare this month's dining to the last 6 months",
+            context: .empty, entries: entries, budgets: [], headCategories: [head], settings: testSettings(), calendar: .current, today: testDate(2025, 6, 20)
+        )
+        guard let result else { return XCTFail("a well-formed current+trend pair for the same category must compose") }
+        XCTAssertTrue(result.answer.hasSufficientData)
+        XCTAssertTrue(result.answer.headline.contains("300"), result.answer.headline)
+        XCTAssertTrue(result.answer.headline.contains("100"), result.answer.headline)
+        XCTAssertEqual(result.answer.comparisonIsFavorable, false, "spending more than usual is unfavorable")
+        XCTAssertTrue(result.answer.supportingDetail.contains("higher"), result.answer.supportingDetail)
+    }
+
+    /// Order must not matter — the composer identifies roles by field content, not position.
+    func testRoleAssignmentIsOrderIndependent() async {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
+        var entries: [Entry] = []
+        for monthOffset in 1...5 {
+            let date = Calendar.current.date(byAdding: .month, value: -monthOffset, to: testDate(2025, 6, 15))!
+            entries.append(TestSupport.makeEntry(amount: 100, date: date, type: .expense, category: restaurants, wallet: wallet))
+        }
+        entries.append(TestSupport.makeEntry(amount: 300, date: testDate(2025, 6, 10), type: .expense, category: restaurants, wallet: wallet))
+        context.insert(wallet); context.insert(head); context.insert(restaurants)
+        entries.forEach { context.insert($0) }
+
+        let current = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let trend = blankInterpretation(metric: .spending, categoryName: "Restaurants", wantsTrend: true, trendSpan: 6)
+
+        let swapped = AskClaritySemanticComposition.respond(
+            first: trend, second: current, question: "test", context: .empty, entries: entries, budgets: [],
+            headCategories: [head], settings: testSettings(), calendar: .current, today: testDate(2025, 6, 20)
+        )
+        XCTAssertNotNil(swapped)
+    }
+
+    /// Two trend requests, or two plain amounts — anything other than exactly one trend side and
+    /// one plain side — is never guessed into a shape.
+    func testTwoTrendCallsNeverCompose() async {
+        let trendA = blankInterpretation(metric: .spending, categoryName: "Restaurants", wantsTrend: true, trendSpan: 6)
+        let trendB = blankInterpretation(metric: .spending, categoryName: "Restaurants", wantsTrend: true, trendSpan: 3)
+        let result = AskClaritySemanticComposition.respond(
+            first: trendA, second: trendB, question: "test", context: .empty, entries: [], budgets: [],
+            headCategories: [], settings: testSettings(), calendar: .current, today: today
+        )
+        XCTAssertNil(result)
+    }
+
+    func testTwoPlainAmountsNeverCompose() async {
+        let a = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let b = blankInterpretation(metric: .spending, categoryName: "Groceries", period: .named(.thisMonth))
+        let result = AskClaritySemanticComposition.respond(
+            first: a, second: b, question: "test", context: .empty, entries: [], budgets: [],
+            headCategories: [], settings: testSettings(), calendar: .current, today: today
+        )
+        XCTAssertNil(result)
+    }
+
+    /// Different subjects (category A's current figure vs. category B's trend) must never be
+    /// composed against each other — this is never a cross-category average.
+    func testMismatchedSubjectsNeverCompose() async {
+        let context = TestSupport.makeInMemoryContext()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
+        let groceries = TestSupport.makeCategory(name: "Groceries", headCategory: head)
+        context.insert(head); context.insert(restaurants); context.insert(groceries)
+
+        let current = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let trend = blankInterpretation(metric: .spending, categoryName: "Groceries", wantsTrend: true, trendSpan: 6)
+        let result = AskClaritySemanticComposition.respond(
+            first: current, second: trend, question: "test", context: .empty, entries: [], budgets: [],
+            headCategories: [head], settings: testSettings(), calendar: .current, today: today
+        )
+        XCTAssertNil(result)
+    }
+
+    /// Fewer than two usable historical points (e.g. a brand-new category) means "average" isn't
+    /// meaningful yet — never fabricated from a single point.
+    func testInsufficientHistoryNeverComposes() async {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
+        let entry = TestSupport.makeEntry(amount: 50, date: testDate(2025, 6, 10), type: .expense, category: restaurants, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(restaurants); context.insert(entry)
+
+        let current = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let trend = blankInterpretation(metric: .spending, categoryName: "Restaurants", wantsTrend: true, trendSpan: 6)
+        let result = AskClaritySemanticComposition.respond(
+            first: current, second: trend, question: "test", context: .empty, entries: [entry], budgets: [],
+            headCategories: [head], settings: testSettings(), calendar: .current, today: testDate(2025, 6, 20)
+        )
+        XCTAssertNil(result)
+    }
+
+    /// Consistency with the deterministic path: `trendSpan: 2` is the minimum valid span (one
+    /// historical period, right before the current one) — the semantic path must honor that exact
+    /// window too, not reject it against some larger, unrelated fixed minimum.
+    func testMinimumValidTrendSpanOfTwoComposesWithExactlyOneHistoricalPoint() async {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
+        let may = TestSupport.makeEntry(amount: 80, date: testDate(2025, 5, 15), type: .expense, category: restaurants, wallet: wallet)
+        let june = TestSupport.makeEntry(amount: 120, date: testDate(2025, 6, 10), type: .expense, category: restaurants, wallet: wallet)
+        context.insert(wallet); context.insert(head); context.insert(restaurants); context.insert(may); context.insert(june)
+
+        let current = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let trend = blankInterpretation(metric: .spending, categoryName: "Restaurants", wantsTrend: true, trendSpan: 2)
+        let result = AskClaritySemanticComposition.respond(
+            first: current, second: trend, question: "test", context: .empty, entries: [may, june], budgets: [],
+            headCategories: [head], settings: testSettings(), calendar: .current, today: testDate(2025, 6, 20)
+        )
+        guard let result else { return XCTFail("exactly the requested 2-period window (1 historical point) must compose") }
+        XCTAssertTrue(result.answer.headline.contains("80"), result.answer.headline)
+    }
+}
+
+// MARK: - End-to-end `.composed` wiring through `respondWithSemanticFallback`
+
+final class AskClarityEngineComposedFallbackTests: XCTestCase {
+    private func makeFixture() -> (context: ModelContext, wallet: Wallet, head: HeadCategory, category: FinanceTracker.Category, entries: [Entry]) {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let head = TestSupport.makeHeadCategory(name: "Food")
+        let restaurants = TestSupport.makeCategory(name: "Restaurants", headCategory: head)
+        var entries: [Entry] = []
+        for monthOffset in 1...5 {
+            let date = Calendar.current.date(byAdding: .month, value: -monthOffset, to: testDate(2025, 6, 15))!
+            entries.append(TestSupport.makeEntry(amount: 100, date: date, type: .expense, category: restaurants, wallet: wallet))
+        }
+        entries.append(TestSupport.makeEntry(amount: 300, date: testDate(2025, 6, 10), type: .expense, category: restaurants, wallet: wallet))
+        context.insert(wallet); context.insert(head); context.insert(restaurants)
+        entries.forEach { context.insert($0) }
+        return (context, wallet, head, restaurants, entries)
+    }
+
+    func testComposedOutcomeProducesTheComposedAnswerEndToEnd() async {
+        let fixture = makeFixture()
+        let current = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let trend = blankInterpretation(metric: .spending, categoryName: "Restaurants", wantsTrend: true, trendSpan: 6)
+        let stub = StubSemanticProvider(result: .composed(current, trend))
+
+        let result = await AskClarityEngine.respondWithSemanticFallback(
+            to: "I've been treating myself to eating out, curious how unusual that is", context: .empty, entries: fixture.entries, budgets: [],
+            headCategories: [fixture.head], settings: testSettings(), today: testDate(2025, 6, 20), semanticProvider: stub
+        )
+        XCTAssertTrue(result.answer.hasSufficientData)
+        XCTAssertTrue(result.answer.headline.contains("300"), result.answer.headline)
+    }
+
+    /// A `.composed` outcome that doesn't match the one recognized shape degrades to the local
+    /// unknown answer — never a guess, and never a crash.
+    func testUnrecognizedComposedShapeFallsBackToTheLocalUnknownAnswer() async {
+        let a = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let b = blankInterpretation(metric: .income, categoryName: "Restaurants", period: .named(.lastMonth))
+        let stub = StubSemanticProvider(result: .composed(a, b))
+
+        let result = await AskClarityEngine.respondWithSemanticFallback(
+            to: "gibberish", context: .empty, entries: [], budgets: [], headCategories: [],
+            settings: testSettings(), today: today, semanticProvider: stub
+        )
+        XCTAssertFalse(result.answer.hasSufficientData)
+        XCTAssertEqual(result.answer.headline, "I couldn't find a supported way to answer that yet.")
+    }
+
+    /// Once a session's composition-failure budget is exhausted, a `.composed` outcome degrades
+    /// to its first interpretation alone (the same single-step answer `.understood` would give),
+    /// never attempting composition again and never a second network call.
+    func testExhaustedCompositionBudgetDegradesToTheFirstInterpretationAlone() async {
+        let fixture = makeFixture()
+        let current = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let trend = blankInterpretation(metric: .spending, categoryName: "Restaurants", wantsTrend: true, trendSpan: 6)
+        let stub = StubSemanticProvider(result: .composed(current, trend))
+        let budget = AskClaritySemanticCallBudget(maxCompositionFailures: 0)
+
+        let result = await AskClarityEngine.respondWithSemanticFallback(
+            to: "I've been treating myself to eating out, curious how unusual that is", context: .empty, entries: fixture.entries, budgets: [],
+            headCategories: [fixture.head], settings: testSettings(), today: testDate(2025, 6, 20), semanticProvider: stub, callBudget: budget
+        )
+        // Degrades to the plain "this month" amount (300) rather than the composed comparison.
+        XCTAssertTrue(result.answer.hasSufficientData)
+        XCTAssertTrue(result.answer.headline.contains("300"), result.answer.headline)
+        XCTAssertFalse(result.answer.headline.contains("average"), result.answer.headline)
+    }
+
+    /// A composition that fails to produce an answer (e.g. a `.composed` pair that doesn't match
+    /// the one recognized shape) must count against the session's composition-failure budget —
+    /// never retried for this question, and counted so a persistently-misbehaving provider is
+    /// eventually shut off from the composed path for the rest of the session.
+    func testAFailedCompositionIsRecordedAgainstTheBudget() async {
+        let a = blankInterpretation(metric: .spending, categoryName: "Restaurants", period: .named(.thisMonth))
+        let b = blankInterpretation(metric: .income, categoryName: "Restaurants", period: .named(.lastMonth))
+        let stub = StubSemanticProvider(result: .composed(a, b))
+        let budget = AskClaritySemanticCallBudget(maxCompositionFailures: 1)
+
+        _ = await AskClarityEngine.respondWithSemanticFallback(
+            to: "gibberish", context: .empty, entries: [], budgets: [], headCategories: [],
+            settings: testSettings(), today: today, semanticProvider: stub, callBudget: budget
+        )
+        XCTAssertFalse(budget.compositionAllowed, "one unrecognized composition shape should have consumed the single allowed failure")
     }
 }
 
@@ -612,13 +906,14 @@ final class AskClaritySemanticDeterminismTests: XCTestCase {
     /// a stray `Date.now`/UUID) by proving the exact same raw reply really does parse to the exact
     /// same outcome, every time, many times in a row.
     func testParsingTheSameRawReplyRepeatedlyAlwaysProducesTheSameOutcome() {
-        let json = """
-        {"result":"understood","metric":"spending","categoryName":"Restaurants",\
-        "period":{"kind":"named","value":"thisMonth"},"ranking":null,"budgetState":null,\
-        "wantsBreakdown":false,"wantsTrend":false,"trendSpan":null,"wantsList":false,\
-        "wantsTransactionRanking":false,"wantsAssessment":false,"comparisonRequested":true}
-        """
-        let results = (0..<25).map { _ in AskClaritySemanticResponseParser.parse(json) }
+        let response = toolUseResponse(calls: [(
+            "classify_understood_question",
+            """
+            {"metric":"spending","categoryName":"Restaurants","period":{"kind":"named","value":"thisMonth"},\
+            "comparisonRequested":true}
+            """
+        )])
+        let results = (0..<25).map { _ in AskClarityToolUseResponseParser.parse(response) }
         XCTAssertTrue(results.allSatisfy { $0 == results[0] }, "identical raw text must always parse to the identical outcome")
     }
 

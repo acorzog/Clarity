@@ -30,6 +30,12 @@ enum AskClarityExecutionResult {
     /// shorter than the plan's requested `trendSpan` whenever the period kind can't chain back
     /// that far (see `AskClarityPeriodKind.previousEquivalent`).
     case trend(points: [(period: AskClarityPeriod, amount: Decimal)])
+    /// `current` is the asked-about period's own amount; `historicalPoints` are the consecutive
+    /// equivalent periods immediately before it (oldest first) — the exact same chain `.trend`
+    /// builds, with the current period's own point already excluded, ready for
+    /// `AskClarityTrendAverageComparison.compute` to average. `hasData` mirrors `.amount`'s own
+    /// field — only meaningful for a plain `.remainingBudget` total.
+    case trendAverageComparison(current: Decimal, hasData: Bool, historicalPoints: [(period: AskClarityPeriod, amount: Decimal)])
     /// One row per calendar day with eligible spending in the period, highest-first — the day-level
     /// analog of `categoryRanking`, optionally scoped to `AskClarityPlan.subjects.first?.categories`.
     case dayRanking(rows: [(day: Date, amount: Decimal)])
@@ -65,6 +71,8 @@ enum AskClarityExecutor {
             return executeCategoryBreakdown(plan: plan, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, calendar: calendar, today: today)
         case .trend:
             return executeTrend(plan: plan, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, calendar: calendar, today: today)
+        case .trendAverageComparison:
+            return executeTrendAverageComparison(plan: plan, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, calendar: calendar, today: today)
         case .rankDays:
             return executeDayRanking(plan: plan, entries: entries, calendar: calendar, today: today)
         }
@@ -281,5 +289,31 @@ enum AskClarityExecutor {
             amount(for: period).map { (period: period, amount: $0) }
         }
         return .trend(points: points)
+    }
+
+    // MARK: - Trend average comparison
+
+    /// Reuses `executeAmount`/`executeTrend` verbatim — never a second definition of "what's the
+    /// current period's figure" or "how does the equivalent-period chain get built." Only the
+    /// combination (current point vs. everything else in the same chain) is new, and even that
+    /// composition is shared with the semantic-fallback path via `AskClarityTrendAverageComparison`
+    /// (see `AskClarityEngine.respondToTrendAverageComparison` and `AskClaritySemanticComposition`).
+    private static func executeTrendAverageComparison(
+        plan: AskClarityPlan, entries: [Entry], budgets: [Budget], headCategories: [HeadCategory], settings: BudgetCalculationSettings, calendar: Calendar, today: Date
+    ) -> AskClarityExecutionResult {
+        let amountPlan = AskClarityPlan(operation: .amount, metric: plan.metric, subjects: plan.subjects, period: plan.period, comparison: nil, ranking: nil)
+        guard case .amount(let current, _, _, let hasData) = executeAmount(
+            plan: amountPlan, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, calendar: calendar, today: today
+        ) else { return .unresolvable }
+
+        let trendPlan = AskClarityPlan(operation: .trend, metric: plan.metric, subjects: plan.subjects, period: plan.period, comparison: nil, ranking: nil, trendSpan: plan.trendSpan)
+        guard case .trend(let points) = executeTrend(
+            plan: trendPlan, entries: entries, budgets: budgets, headCategories: headCategories, settings: settings, calendar: calendar, today: today
+        ) else { return .unresolvable }
+
+        // The chain's own first/most-recent point *is* `plan.period` — excluded here so the
+        // historical average this feeds never includes the very period being compared against it.
+        let historicalPoints = points.filter { $0.period.label != plan.period.label }
+        return .trendAverageComparison(current: current, hasData: hasData, historicalPoints: historicalPoints)
     }
 }
