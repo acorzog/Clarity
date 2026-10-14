@@ -14,10 +14,17 @@ final class SupabaseManager {
         return bundleID.hasSuffix(".dev") ? "financetrackerdev" : "financetracker"
     }
 
-    /// Where the password-recovery email link redirects back into the app — Supabase appends its
-    /// PKCE `code` as a query item and 302s here after validating the emailed token.
+    /// Where the password-recovery email link redirects back into the app. Points at the
+    /// `reset-password` Edge Function's landing page — an HTTPS URL, not the bare `financetracker:`
+    /// scheme directly — because a custom URL scheme only resolves when opened straight from a
+    /// device with the app installed; any other context (desktop, link-preview crawler, no app
+    /// installed) left the link with nowhere to land. The landing page itself bridges into
+    /// `\(urlScheme)://reset-password?code=...` (and shows a plain-language fallback if that
+    /// doesn't resolve), so `RootView.onOpenURL`/`completePasswordRecovery` are unaffected — see
+    /// `supabase/functions/reset-password/index.ts`. `scheme` tells the page which app install
+    /// (prod/dev) actually requested this, since Supabase appends its own `code` query item on top.
     static var passwordRecoveryRedirectURL: URL {
-        URL(string: "\(urlScheme)://reset-password")!
+        URL(string: "https://coktoiawbuxxgehnahhl.supabase.co/functions/v1/reset-password?scheme=\(urlScheme)")!
     }
 
     /// Where the "confirm your signup" email link redirects back into the app. Kept distinct

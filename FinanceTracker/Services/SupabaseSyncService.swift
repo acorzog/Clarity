@@ -221,7 +221,12 @@ enum SupabaseSyncProgress: Equatable {
 /// Deliberately *not* wired into any model-mutation call site yet (`AddTransactionView`,
 /// `WalletEditorView`, etc.) — each `sync*` method is a standalone, explicitly-invoked operation
 /// until a later phase decides where to trigger it automatically.
-@MainActor
+///
+/// Not actor-isolated (previously `@MainActor`) — `SyncCoordinator`'s automatic sync pass now
+/// calls each method via `BackgroundSyncExecutor`, off the Main Actor, so the `modelContext` a
+/// caller passes in must be whichever context *that caller* owns (the main context for direct/
+/// test callers, `BackgroundSyncExecutor`'s own private context for an automatic pass) — this
+/// class itself has no opinion on which.
 final class SupabaseSyncService {
     static let shared = SupabaseSyncService()
 

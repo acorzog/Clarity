@@ -143,11 +143,18 @@ private struct InsightsSheetView: View {
     let month: Date
 
     @Environment(\.dismiss) private var dismiss
+    // `InsightsView` takes these as parameters rather than fetching its own `@Query` — see that
+    // type's own doc comment. `PlanView` (this sheet's presenter) holds no overlapping `@Query` of
+    // its own, so fetching here (not up in `PlanView`) is safe; this sheet simply owns the one
+    // subscription `InsightsView` needs.
+    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
+    @Query private var allBudgets: [Budget]
+    @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                InsightsView(month: month)
+                InsightsView(month: month, allEntries: allEntries, allBudgets: allBudgets, headCategories: headCategories)
             }
             .darkScreenBackground()
             .navigationTitle("Insights")

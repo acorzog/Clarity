@@ -1,0 +1,6 @@
+[functions.reset-password]
+# Public landing page opened from an email link — the recipient has no Supabase session/JWT at
+# that point, so the default per-function JWT check (which would 401 before the handler even
+# runs) must be off here. `delete-account` is unaffected: it stays on the implicit default (JWT
+# required) and does its own auth via the forwarded Authorization header inside the handler.
+verify_jwt = false

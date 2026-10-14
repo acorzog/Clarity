@@ -247,7 +247,15 @@ struct RootView: View {
         // not allowed." This hops delivery to the main thread first; the `ModelContext` itself
         // still only ever gets touched on the main thread, same as every other call site.
         .onReceive(NotificationCenter.default.publisher(for: .NSPersistentStoreRemoteChange).receive(on: DispatchQueue.main)) { _ in
-            modelContext.rollback()
+            // Skipped while our own sync pass is running — see `SyncCoordinator.
+            // isSyncPassInProgress`'s doc comment for why rolling back here on every one of a
+            // pass's six intermediate saves (rather than once, which the pass itself now does at
+            // its own end) was invalidating objects a `@Query` view could be mid-computation over.
+            // A genuinely different process's write (widget/Shortcuts) still rolls back
+            // immediately here, same as always — this flag is only ever true during our own pass.
+            if !SyncCoordinator.shared.isSyncPassInProgress {
+                modelContext.rollback()
+            }
             SyncCoordinator.shared.handleCrossProcessChange()
         }
         // Automatic sync trigger 4 (Phase 4G.3B) — fires after every successful local save,
@@ -256,7 +264,14 @@ struct RootView: View {
         // schedules a network sync itself — it only marks that a sync-relevant change happened,
         // via `SyncCoordinator.handleDidSave`'s own filtering (only the five sync-relevant model
         // types; an unrelated save, e.g. `SpendingInsight`/`GoalContribution`, marks nothing).
-        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave)) { notification in
+        //
+        // `.receive(on: DispatchQueue.main)` — same reasoning as the identical hop on the
+        // `.NSPersistentStoreRemoteChange` listener above: `BackgroundSyncExecutor`'s own saves
+        // (an automatic sync pass now runs off the Main Actor so it can't freeze the UI) post this
+        // exact notification from a background thread, and `handleDidSave` below touches
+        // `modelContext`, a main-actor-confined `ModelContext` `@Query` views observe. Without
+        // this hop that was "Publishing changes from background threads is not allowed."
+        .onReceive(NotificationCenter.default.publisher(for: ModelContext.didSave).receive(on: DispatchQueue.main)) { notification in
             // TEMPORARY — see SyncDiagnosticLog's doc comment.
             let userInfoKeys = notification.userInfo?.keys.map { "\($0)" } ?? []
             SyncDiagnosticLog.log("RootView received ModelContext.didSave — userInfo keys: \(userInfoKeys)")

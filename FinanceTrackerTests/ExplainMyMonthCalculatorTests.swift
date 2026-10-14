@@ -213,6 +213,59 @@ final class ExplainMyMonthNotableChangesTests: XCTestCase {
         XCTAssertEqual(up?.isFavorable, false)
         XCTAssertEqual(down?.isFavorable, true)
     }
+
+    /// A Fixed category (e.g. a utility bill) that simply hasn't posted yet this cycle reads as
+    /// `actual == 0` — exactly like a real 100% decrease would — but it isn't one; the bill is
+    /// still coming. This is the specific false positive reported against "Explain My Month":
+    /// Electricity showing as "100% saved" mid-month purely because the bill always lands later.
+    /// Groceries carries real spend both months so the month itself isn't `hasActivity == false`
+    /// (which would trivially empty every field regardless of this fix).
+    func testFixedCategoryWithNoChargeYetIsNotFlaggedAsADecrease() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let (electricityHead, electricity) = makeHeadAndCategory(name: "Electricity", in: context)
+        let (groceriesHead, groceries) = makeHeadAndCategory(name: "Groceries", in: context)
+        let electricityPrevious = TestSupport.makeEntry(amount: 80, date: testDate(2025, 5, 20), type: .expense, category: electricity, wallet: wallet)
+        let groceriesPrevious = TestSupport.makeEntry(amount: 50, date: testDate(2025, 5, 10), type: .expense, category: groceries, wallet: wallet)
+        let groceriesCurrent = TestSupport.makeEntry(amount: 50, date: testDate(2025, 6, 10), type: .expense, category: groceries, wallet: wallet)
+        let electricityBudget = TestSupport.makeBudget(category: electricity, monthlyLimit: 80, month: 6, year: 2025, isFixed: true)
+        context.insert(electricityPrevious); context.insert(groceriesPrevious); context.insert(groceriesCurrent)
+
+        let explanation = ExplainMyMonthCalculator.explain(
+            month: testDate(2025, 6, 1),
+            entries: [electricityPrevious, groceriesPrevious, groceriesCurrent],
+            budgets: [electricityBudget],
+            headCategories: [electricityHead, groceriesHead],
+            settings: testSettings()
+        )
+
+        XCTAssertTrue(explanation.hasActivity)
+        XCTAssertTrue(explanation.notableCategoryChanges.isEmpty, "Electricity's drop to 0 shouldn't surface as a notable change")
+        XCTAssertNotEqual(explanation.positiveHighlight?.kind, .categoryDecrease)
+    }
+
+    /// The same zero-vs-Fixed guard must not suppress a *Variable* category's real drop to zero
+    /// (e.g. no dining out this month at all) — only `isFixed` categories get this treatment.
+    func testVariableCategoryWithNoSpendIsStillFlaggedAsADecrease() {
+        let context = TestSupport.makeInMemoryContext()
+        let wallet = TestSupport.makeWallet()
+        let (diningHead, dining) = makeHeadAndCategory(name: "Dining Out", in: context)
+        let (groceriesHead, groceries) = makeHeadAndCategory(name: "Groceries", in: context)
+        let diningPrevious = TestSupport.makeEntry(amount: 80, date: testDate(2025, 5, 20), type: .expense, category: dining, wallet: wallet)
+        let groceriesPrevious = TestSupport.makeEntry(amount: 50, date: testDate(2025, 5, 10), type: .expense, category: groceries, wallet: wallet)
+        let groceriesCurrent = TestSupport.makeEntry(amount: 50, date: testDate(2025, 6, 10), type: .expense, category: groceries, wallet: wallet)
+        context.insert(diningPrevious); context.insert(groceriesPrevious); context.insert(groceriesCurrent)
+
+        let explanation = ExplainMyMonthCalculator.explain(
+            month: testDate(2025, 6, 1),
+            entries: [diningPrevious, groceriesPrevious, groceriesCurrent],
+            budgets: [],
+            headCategories: [diningHead, groceriesHead],
+            settings: testSettings()
+        )
+
+        XCTAssertEqual(explanation.notableCategoryChanges.map(\.subject), ["Dining Out"])
+    }
 }
 
 // MARK: - Budget performance

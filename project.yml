@@ -6,6 +6,10 @@ options:
 configs:
   Debug: debug
   Release: release
+packages:
+  supabase-swift:
+    url: https://github.com/supabase/supabase-swift.git
+    from: 2.5.1
 targets:
   FinanceTracker:
     type: application
@@ -16,6 +20,8 @@ targets:
     dependencies:
       - target: FinanceTrackerWidgets
         embed: true
+      - package: supabase-swift
+        product: Supabase
     entitlements:
       path: FinanceTracker/FinanceTracker-LocalOnly.entitlements
       properties:
@@ -77,6 +83,9 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: FinanceTracker
+    dependencies:
+      - package: supabase-swift
+        product: Supabase
     entitlements:
       path: FinanceTracker/FinanceTracker-Dev.entitlements
       properties:
@@ -132,6 +141,8 @@ targets:
         excludes:
           - "AskClarity*"
           - "AnthropicClaritySemanticProvider.swift"
+          - "MonthAskClarityController.swift"
+          - "ClarityScorePresentation.swift"
       - path: FinanceTracker/Views/Theme.swift
       - path: FinanceTracker/Services/SharedModelContainer.swift
       # Design-system tokens only (not Components/) — BudgetGaugeWidgetView needs the shared

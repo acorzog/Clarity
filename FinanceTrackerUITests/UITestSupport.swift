@@ -6,21 +6,82 @@ import XCTest
 enum UITestSupport {
     /// Launches the app with `-uiTestReset`, which `FinanceTrackerApp.init()` uses to delete the
     /// on-disk store before `SeedData.seedIfNeeded` runs — every test therefore starts from the
-    /// same clean slate (the default categories and a single "Spending" wallet, no transactions or
-    /// budgets) regardless of what an earlier test run left behind. Only ever set by this test
-    /// bundle, so it can never affect a real launch or touch a real device's actual data.
+    /// same clean local slate (the default categories and a single "Spending" wallet, no
+    /// transactions or budgets) regardless of what an earlier test run left behind. Only ever set
+    /// by this test bundle, so it can never affect a real launch or touch a real device's actual
+    /// data.
+    ///
+    /// `-uiTestReset` only wipes the *local* SwiftData store — it has no effect on a Supabase
+    /// session already on disk (that's Keychain/UserDefaults-backed, a separate system; see
+    /// `RootAuthState`). Since the account feature landed, a genuinely fresh simulator with no
+    /// prior session lands on the sign-in screen, not the tab bar directly, so this signs in with
+    /// `TEST_USER`/`TEST_USER_PASSWORD` (read from the test runner's own environment — set them in
+    /// the scheme's Test action, or `TEST_USER=... TEST_USER_PASSWORD=... xcodebuild test ...` —
+    /// never hardcoded here) whenever that screen appears. Most runs after the first never actually
+    /// hit this path: the session from the previous run is still on disk, so launch goes straight
+    /// to the tab bar as before.
     static func launchApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["-uiTestReset"]
         app.launch()
         // `RootView` shows `LaunchScreenView` at `.zIndex(2)` — an opaque overlay — for a fixed
-        // 1.3s after launch before revealing the tab bar underneath. Without waiting it out here,
-        // a test's very first tap can land on that overlay instead of the tab bar it's aiming
+        // 1.3s after launch before revealing whichever screen is underneath. Without waiting it
+        // out here, a test's very first tap can land on that overlay instead of what it's aiming
         // for, silently going nowhere rather than failing loudly — exactly the kind of flake that
         // only shows up under a loaded/slow simulator, since a human's reaction time naturally
         // clears it every time a person actually uses the app.
-        _ = app.tabBars.firstMatch.waitForExistence(timeout: 5)
+        let tabBar = app.tabBars.firstMatch
+        let signInButton = app.buttons["Sign In"]
+        let exists = NSPredicate(format: "exists == true")
+        _ = XCTWaiter().wait(
+            for: [
+                XCTNSPredicateExpectation(predicate: exists, object: tabBar),
+                XCTNSPredicateExpectation(predicate: exists, object: signInButton),
+            ],
+            timeout: 5
+        )
+
+        if signInButton.exists && !tabBar.exists {
+            signInWithTestAccount(app: app)
+        }
+
+        // Signing in triggers a real network round trip (and, once signed in, an automatic sync
+        // pass) — allow noticeably longer than the plain splash-clearing wait above for the tab
+        // bar to actually land.
+        _ = tabBar.waitForExistence(timeout: tabBar.exists ? 5 : 20)
         return app
+    }
+
+    /// Reads credentials from the environment, not literals, so no real account details are ever
+    /// committed to source. Fails loudly (not a silent skip) when they're missing, since a missing
+    /// env var would otherwise show up as every single UI test timing out on the tab bar with no
+    /// indication why.
+    private static func signInWithTestAccount(app: XCUIApplication) {
+        guard
+            let email = ProcessInfo.processInfo.environment["TEST_USER"],
+            let password = ProcessInfo.processInfo.environment["TEST_USER_PASSWORD"]
+        else {
+            XCTFail("The app requires sign-in on this simulator but TEST_USER/TEST_USER_PASSWORD aren't set in the test environment. Set them in the scheme's Test action environment variables, or pass TEST_USER=... TEST_USER_PASSWORD=... to xcodebuild test.")
+            return
+        }
+
+        let emailField = app.textFields["Email"]
+        guard emailField.waitForExistence(timeout: 8) else {
+            XCTFail("Sign-in screen should show an Email field")
+            return
+        }
+        emailField.tap()
+        emailField.typeText(email)
+
+        let passwordField = app.secureTextFields["Password"]
+        guard passwordField.waitForExistence(timeout: 8) else {
+            XCTFail("Sign-in screen should show a Password field")
+            return
+        }
+        passwordField.tap()
+        passwordField.typeText(password)
+
+        app.buttons["Sign In"].tap()
     }
 }
 

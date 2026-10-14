@@ -130,6 +130,22 @@ final class SyncCoordinator {
     /// history tracking notifies every observer, not only a genuinely different process), so both
     /// of `RootView`'s notification paths are suppressed by the same window, not just one of them.
     private var isApplyingPullChanges = false
+    /// True for the entire duration of `runOneSyncPass` (not just its pull steps). Each of the six
+    /// steps saves against its own `BackgroundSyncExecutor` context and posts its own
+    /// `.NSPersistentStoreRemoteChange`, which `RootView` otherwise answers with an immediate
+    /// `modelContext.rollback()` on the *main* context — up to six rollbacks in one pass. Rolling
+    /// back invalidates every object the main context currently has registered, including whatever
+    /// a `@Query`-driven view is mid-computation over (walking `.category`/`.headCategory`/`.wallet`
+    /// relationships) — landing one there is what produced the "Attempting to read a value after
+    /// it has been invalidated" flood and the real freeze/crash reported from a loaded account
+    /// (not reproducible on a fresh/empty one, which never has enough to be mid-computation when a
+    /// rollback lands). `RootView` checks this flag and skips its own immediate rollback while
+    /// it's true; `runOneSyncPass` does exactly one rollback itself once the whole pass finishes,
+    /// so the UI still ends up fresh — just from one rollback at a well-defined boundary instead of
+    /// up to six at unpredictable moments mid-pass. A genuinely different process's write (widget/
+    /// Shortcuts) is untouched by this — it arrives while this flag is false and still rolls back
+    /// immediately, exactly as before.
+    private(set) var isSyncPassInProgress = false
     /// Phase 4G.3B — set by `handleDidSave` whenever a genuine local save touches a syncable
     /// model; cleared only when a sync pass actually completes all six steps successfully (never
     /// on failure or on an outright skip, so changes that didn't really make it out aren't
@@ -406,36 +422,51 @@ final class SyncCoordinator {
         // replaces logged on success alone — a failed pass's partial duration is still useful for
         // diagnosing which attempt was slow right before it failed.
         let passStart = ContinuousClock.now
+        isSyncPassInProgress = true
         defer {
+            isSyncPassInProgress = false
+            // The one rollback this whole pass's writes get — see `isSyncPassInProgress`'s own
+            // doc comment for why this replaces up to six intermediate ones `RootView` would
+            // otherwise have done mid-pass. Runs on success *and* failure (whatever steps did
+            // complete before a throw still wrote through `BackgroundSyncExecutor`'s own context
+            // and deserve to be visible), and unconditionally — there's no cheap way to know
+            // whether anything actually changed, and an extra rollback with nothing to pick up is
+            // harmless, unlike landing one mid-render.
+            modelContext.rollback()
             SyncDiagnosticLog.log("runOneSyncPass — total duration \(ContinuousClock.now - passStart)")
         }
 
         do {
             let userID = try await syncService.requireUserID()
+            // Runs every step against its own private, off-Main-Actor context instead of the
+            // main one `modelContext` points at — see `BackgroundSyncExecutor`'s doc comment for
+            // why this is what actually stops a sync pass from freezing the UI, and how the main
+            // context still ends up with everything this writes.
+            let executor = BackgroundSyncExecutor(modelContainer: modelContext.container)
 
             try await timedStep("pullReferenceData") {
                 try await withPullInducedSaveSuppression {
-                    try await syncService.pullReferenceData(modelContext: modelContext, userID: userID)
+                    try await executor.pullReferenceData(syncService: syncService, userID: userID)
                 }
             }
             try await timedStep("pullBudgets") {
                 try await withPullInducedSaveSuppression {
-                    try await syncService.pullBudgets(modelContext: modelContext, userID: userID)
+                    try await executor.pullBudgets(syncService: syncService, userID: userID)
                 }
             }
             try await timedStep("pullEntries") {
                 try await withPullInducedSaveSuppression {
-                    try await syncService.pullEntries(modelContext: modelContext, userID: userID)
+                    try await executor.pullEntries(syncService: syncService, userID: userID)
                 }
             }
             try await timedStep("syncReferenceData") {
-                try await syncService.syncReferenceData(modelContext: modelContext, userID: userID)
+                try await executor.syncReferenceData(syncService: syncService, userID: userID)
             }
             try await timedStep("syncBudgets") {
-                try await syncService.syncBudgets(modelContext: modelContext, userID: userID)
+                try await executor.syncBudgets(syncService: syncService, userID: userID)
             }
             try await timedStep("syncEntries") {
-                try await syncService.syncEntries(modelContext: modelContext, userID: userID)
+                try await executor.syncEntries(syncService: syncService, userID: userID)
             }
 
             lastSyncStore.lastSuccessfulSync = .now

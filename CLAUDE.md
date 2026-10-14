@@ -8,6 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 shared/split expenses, spending insights, and a home-screen widget. No third-party dependencies —
 SwiftUI, SwiftData, Charts, WidgetKit only.
 
+**See `ARCHITECTURE.md`** for the full feature map (every area: Goals, Shared/Collaboration,
+Calendar, Backup/Export, App Lock, Account/Auth, Shortcuts/Widget, AI categorization/insights, Ask
+Clarity, sync, design system, testing conventions) with real file paths and the "why" behind each
+one. Read it before a task that touches a feature not already covered below, instead of
+re-exploring the codebase from scratch.
+
 ## Commands
 
 The `.xcodeproj` is checked in and is what you normally build/test against directly.
