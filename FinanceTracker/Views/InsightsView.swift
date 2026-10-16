@@ -2,19 +2,36 @@ import SwiftUI
 import SwiftData
 import Charts
 
+/// Takes `allEntries`/`allBudgets`/`headCategories` as plain parameters rather than its own
+/// `@Query` — every call site pushes/presents this from a screen that's already `@Query`-fetched
+/// the exact same predicates and stays mounted underneath while this is on screen (`HomeView`'s
+/// "What's Different → See all", `MonthInsightsDetailView`'s "Explore category insights",
+/// `BudgetView`'s Insights sheet). Two live `@Query` subscriptions on the same entities/predicates
+/// — one in the pushed/presented view, one in its still-mounted presenter — measurably caused a
+/// genuine, reproduced infinite main-thread re-render loop on a real account's data volume
+/// (~130+ entries): each cheap on a handful of entries, imperceptible, but compounding into a full
+/// freeze at real scale. Passing the presenter's own already-fetched arrays through instead
+/// removes the second subscription entirely, not just makes the symptom cheaper.
 struct InsightsView: View {
     let month: Date
+    let allEntries: [Entry]
+    let allBudgets: [Budget]
+    let headCategories: [HeadCategory]
 
     @ObservedObject private var settings = BudgetSettingsStore.shared
-    @Query(filter: #Predicate<Entry> { !$0.isSoftDeleted }, sort: \Entry.date, order: .reverse) private var allEntries: [Entry]
-    @Query private var allBudgets: [Budget]
-    @Query(sort: \HeadCategory.sortOrder) private var headCategories: [HeadCategory]
 
     /// The same shared calculation Remaining uses — see `BudgetCalculator.periodSpendingSummary`.
     /// Per the Phase 1 product decision, "actual" here is scoped to the configurable budget
     /// cycle (not the plain calendar month this view used before), so Insights and Remaining can
     /// no longer disagree about which entries count as "this period."
-    private var summary: PeriodSpendingSummary {
+    ///
+    /// Computed once per `body` evaluation and threaded through explicitly below — this used to be
+    /// a plain computed property accessed independently from `hasData`, `headComparisons`, and
+    /// both cards' initializers (six separate re-invocations per render, each re-walking every
+    /// `Entry`'s `.category` relationship from scratch). On an account with real data (~130
+    /// entries) that multiplied into a genuine multi-second main-thread freeze on push, reproduced
+    /// and measured directly — not noticeable on the handful of entries most manual testing uses.
+    private func summary() -> PeriodSpendingSummary {
         BudgetCalculator.periodSpendingSummary(
             month: month,
             entries: allEntries,
@@ -27,13 +44,13 @@ struct InsightsView: View {
 
     /// Most-planned-first so the categories most worth a glance land at the top of the list,
     /// instead of in whatever order `HeadCategory.sortOrder` happens to put them.
-    private var headComparisons: [HeadComparison] {
+    private func headComparisons(_ summary: PeriodSpendingSummary) -> [HeadComparison] {
         summary.byHeadCategory
             .map { HeadComparison(id: $0.headCategory.id, name: $0.headCategory.name, planned: $0.planned, actual: $0.actual) }
             .sorted { $0.planned > $1.planned }
     }
 
-    private var dailySpend: [DailyPacePoint] {
+    private func dailySpend(_ summary: PeriodSpendingSummary) -> [DailyPacePoint] {
         BudgetCalculator.spendingPace(
             month: month,
             entries: allEntries,
@@ -42,12 +59,12 @@ struct InsightsView: View {
         )
     }
 
-    private var hasData: Bool {
-        !headComparisons.isEmpty || summary.totalBudgeted > 0 || summary.totalSpent > 0
-    }
-
     var body: some View {
-        VStack(spacing: 20) {
+        let summary = summary()
+        let headComparisons = headComparisons(summary)
+        let hasData = !headComparisons.isEmpty || summary.totalBudgeted > 0 || summary.totalSpent > 0
+
+        return VStack(spacing: 20) {
             if !hasData {
                 EmptyStateView(
                     icon: "chart.bar",
@@ -56,7 +73,7 @@ struct InsightsView: View {
                 )
             } else {
                 PlannedVsActualCard(data: headComparisons)
-                SpendPaceCard(data: dailySpend, totalBudget: summary.totalBudgeted)
+                SpendPaceCard(data: dailySpend(summary), totalBudget: summary.totalBudgeted)
             }
         }
         .padding(.horizontal)

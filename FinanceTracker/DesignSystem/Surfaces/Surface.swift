@@ -40,4 +40,29 @@ extension View {
     func surface(_ tier: SurfaceTier = .primary, radius: CGFloat = ClarityRadius.large, padding: CGFloat? = nil) -> some View {
         modifier(SurfaceModifier(tier: tier, radius: radius, padding: padding))
     }
+
+    /// A `surface(.secondary)`-equivalent with a low-opacity color wash layered on top, so a card
+    /// can carry its own accent identity (originally Home's Safe to Spend/Clarity Score/What's
+    /// Different cards) while still sitting on the same flat, no-shadow surface treatment
+    /// (`CLARITY_DESIGN_SYSTEM.md` §10) as every other card — the wash is a translucent overlay,
+    /// not a replacement color system.
+    func claritySurface(tint: Color, radius: CGFloat = ClarityRadius.large, padding: CGFloat = ClaritySpacing.lg) -> some View {
+        modifier(TintedSurfaceModifier(tint: tint, radius: radius, padding: padding))
+    }
+}
+
+private struct TintedSurfaceModifier: ViewModifier {
+    var tint: Color
+    var radius: CGFloat
+    var padding: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(
+                RoundedRectangle(cornerRadius: radius)
+                    .fill(Color.surfaceSecondary)
+                    .overlay(RoundedRectangle(cornerRadius: radius).fill(tint.opacity(0.08)))
+            )
+    }
 }

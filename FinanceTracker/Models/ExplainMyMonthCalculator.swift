@@ -127,7 +127,7 @@ enum ExplainMyMonthCalculator {
         }
 
         let comparison = monthComparison(current: current, previous: previous)
-        let notableChanges = notableCategoryChanges(current: current, previous: previous)
+        let notableChanges = notableCategoryChanges(current: current, previous: previous, budgets: budgets, month: month)
         let budgetPerformance = budgetPerformance(
             current: current, month: month, entries: entries, budgets: budgets,
             headCategories: headCategories, settings: settings, calendar: calendar
@@ -168,7 +168,7 @@ enum ExplainMyMonthCalculator {
     /// (so budget eligibility/hidden-category handling is inherited automatically) and
     /// `WhatsDifferentInsight`'s existing shape rather than inventing a parallel type.
     private static func notableCategoryChanges(
-        current: PeriodSpendingSummary, previous: PeriodSpendingSummary?
+        current: PeriodSpendingSummary, previous: PeriodSpendingSummary?, budgets: [Budget], month: Date
     ) -> [WhatsDifferentInsight] {
         guard let previous else { return [] }
 
@@ -177,6 +177,15 @@ enum ExplainMyMonthCalculator {
                 let previousCategory = previous.byCategory.first(where: { $0.category === currentCategory.category }),
                 previousCategory.actual > 0
             else { return nil }
+
+            // A Fixed category (rent, a subscription, a utility bill) reading exactly 0 this month
+            // after real spend last month is almost always the bill simply not having posted yet
+            // this cycle — not an actual saving — so it's excluded here rather than surfaced as a
+            // false "100% decrease". A partial change (bill posted but for a different amount)
+            // still goes through the normal comparison below.
+            if currentCategory.actual == 0 && budgets.isFixed(for: currentCategory.category, month: month) {
+                return nil
+            }
 
             let fraction = ((currentCategory.actual - previousCategory.actual) / previousCategory.actual).doubleValue
             guard abs(fraction) >= meaningfulChangeThreshold else { return nil }

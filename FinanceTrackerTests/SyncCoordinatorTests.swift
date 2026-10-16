@@ -571,9 +571,37 @@ final class SyncCoordinatorTests: XCTestCase {
         coordinator.scheduleSync(modelContext: context)
 
         await waitUntil { uploader.callOrder.filter { $0 == "headCategoriesBatch" }.count >= 2 }
+        // `headCategoriesBatch` reaching 2 only proves the coalesced extra pass has *started*
+        // `syncReferenceData` — before `BackgroundSyncExecutor`, the remaining steps (categories/
+        // wallets upload, syncBudgets, syncEntries) ran on the same single actor with no further
+        // suspension points, so they were reliably done by the time this poll noticed. Now each
+        // step is its own actor hop between the Main Actor and the background executor, a real
+        // scheduling gap that can land here mid-pass — so wait for the pass's actual *last* step,
+        // `entriesBatch`, before asserting on its result. (`waitForPendingWork()` doesn't help
+        // here: `scheduleSync`'s debounce task nils out `debounceTask` the instant its debounce
+        // elapses, *before* the sync it kicks off even starts running — by the time this line
+        // runs, `debounceTask` is already `nil`, so awaiting it is a no-op.)
+        //
+        // `>= 1`, not `>= 2`: pass #1 reaches `syncEntries` too, but the entry's wallet/category
+        // don't have a `remoteID` yet at that point (pass #1's own `syncReferenceData` already ran
+        // before this test even created them) — `EntryDTO` mapping fails, so pass #1 skips the
+        // entry with zero entries left to upload and never calls `upsertEntries` at all. Only pass
+        // #2 (this entry's wallet/category now minted) produces a real, non-empty entries batch.
+        await waitUntil { uploader.callOrder.contains("entriesBatch") }
 
         XCTAssertEqual(uploader.callOrder.filter { $0 == "headCategoriesBatch" }.count, 2, "the mid-sync trigger must produce exactly one coalesced extra pass")
-        XCTAssertNotNil(entry.remoteID, "the entry created mid-sync must be minted and pushed by the coalesced extra pass, not stranded until an unrelated future trigger")
+        // The coordinator now runs a sync pass against its own private `ModelContext`
+        // (`BackgroundSyncExecutor`, kept off the Main Actor so a pass can't freeze the UI), so the
+        // `remoteID` it mints lands on *that* context's own copy of this row — `entry`, registered
+        // in this test's own `context`, never gets its already-faulted-in property refreshed in
+        // place (`ModelContext.rollback()` only discards *this* context's own uncommitted edits, it
+        // doesn't re-read a sibling context's newer save). A brand new `ModelContext` on the same
+        // container has nothing cached yet, so its fetch is guaranteed to hit the actual persisted
+        // state — the same thing a real signed-in session eventually sees via `RootView`'s
+        // `.NSPersistentStoreRemoteChange` + `rollback()` dance, just asserted on directly here.
+        let verification = ModelContext(context.container)
+        let persisted = try verification.fetch(FetchDescriptor<Entry>()).first { $0.amount == entry.amount && $0.date == entry.date }
+        XCTAssertNotNil(persisted?.remoteID, "the entry created mid-sync must be minted and pushed by the coalesced extra pass, not stranded until an unrelated future trigger")
     }
 
     /// However many triggers land while a sync is in flight, only ever one additional pass runs —
@@ -1044,7 +1072,12 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(uploader.callOrder.filter { $0 == "budgetsBatch" }.count, 1, "syncBudgets must have succeeded exactly once, not thrown")
         XCTAssertEqual(uploader.callOrder.filter { $0 == "entriesBatch" }.count, 1, "syncEntries must have been reached and run after syncBudgets succeeded")
         XCTAssertEqual(uploader.callOrder.last, "entriesBatch", "entries is still the last of the six steps")
-        XCTAssertNotNil(entry.remoteID, "the entry must have actually been minted and pushed, proving syncEntries truly ran, not just that onProgress fired")
+        // See the identical comment in `testEntryCreatedDuringAnActiveSyncIsPushedByTheCoalescedExtraPass`
+        // — the mint happened on `BackgroundSyncExecutor`'s own context, not this test's `context`,
+        // so a fresh context (nothing cached) is used to read back the actually-persisted state.
+        let verification = ModelContext(context.container)
+        let persisted = try verification.fetch(FetchDescriptor<Entry>()).first { $0.amount == entry.amount && $0.date == entry.date }
+        XCTAssertNotNil(persisted?.remoteID, "the entry must have actually been minted and pushed, proving syncEntries truly ran, not just that onProgress fired")
     }
 
     // MARK: - Phase 6.1 — the signal AccountView checks before a destructive sign-out

@@ -20,12 +20,16 @@ extension AskClarityEngine {
     /// local interpreter *understanding* the question and answering it honestly, not a failure to
     /// understand, so they're never second-guessed by an LLM. `semanticProvider` itself never
     /// computes a financial figure and never generates any response text — it only ever returns a
-    /// small, fully-validated `AskClaritySemanticOutcome` (understood/unsupported/needsClarification;
-    /// see that type and `AskClaritySemanticAmbiguityRules`), and an `.understood` one is turned by
-    /// `AskClaritySemanticQueryBuilder` into the exact same kind of `AskClarityQuery` the
-    /// deterministic interpreter produces, then routed through the *unchanged* `respond(toQuery:...)`
-    /// — the same `AskClarityPlanner`, `AskClarityExecutor`, and calculators answer it either way,
-    /// regardless of which interpreter recognized the question.
+    /// small, fully-validated `AskClaritySemanticOutcome` (understood/unsupported/
+    /// needsClarification/composed; see that type and `AskClaritySemanticAmbiguityRules`), via
+    /// native Anthropic tool use rather than a free-text prompt contract. An `.understood` one is
+    /// turned by `AskClaritySemanticQueryBuilder` into the exact same kind of `AskClarityQuery`
+    /// the deterministic interpreter produces, then routed through the *unchanged*
+    /// `respond(toQuery:...)` — the same `AskClarityPlanner`, `AskClarityExecutor`, and
+    /// calculators answer it either way, regardless of which interpreter recognized the question.
+    /// A `.composed` one — two parallel tool calls in that same single response, never a second
+    /// network round-trip — is handled by `AskClaritySemanticComposition`, which runs the exact
+    /// same `AskClarityPlanner`/`AskClarityExecutor` twice and composes the two results in Swift.
     ///
     /// Wired into `AskClarityView`'s chat UI as the async fallback when the local pass alone comes
     /// up empty.
@@ -84,6 +88,28 @@ extension AskClarityEngine {
                 toQuery: query, context: context, entries: entries, budgets: budgets, headCategories: headCategories,
                 settings: settings, calendar: calendar, today: today
             )
+
+        case .composed(let first, let second):
+            // A session that has repeatedly produced a `.composed` outcome this app can't use
+            // degrades to the first interpretation alone — same one-tool-call behavior as
+            // `.understood`, no wasted composition attempt, never a retry of this question.
+            guard callBudget?.compositionAllowed ?? true else {
+                guard let query = AskClaritySemanticQueryBuilder.buildQuery(from: first, question: text, categories: categories, today: today, calendar: calendar) else {
+                    return localResult
+                }
+                return respond(
+                    toQuery: query, context: context, entries: entries, budgets: budgets, headCategories: headCategories,
+                    settings: settings, calendar: calendar, today: today
+                )
+            }
+            guard let composed = AskClaritySemanticComposition.respond(
+                first: first, second: second, question: text, context: context, entries: entries, budgets: budgets,
+                headCategories: headCategories, settings: settings, calendar: calendar, today: today
+            ) else {
+                callBudget?.recordCompositionFailure()
+                return localResult
+            }
+            return composed
         }
     }
 }

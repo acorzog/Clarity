@@ -15,35 +15,9 @@ private struct CompactHeroAmountStyle: ViewModifier {
     }
 }
 
-/// A `SectionCard`-equivalent surface with a low-opacity color wash layered over the standard
-/// `surfaceSecondary` tier, so each Home card can carry its own accent identity (emerald for Safe
-/// to Spend, sky blue for Clarity Score, mint for What's Different — all within the app's
-/// existing green/blue accent range) while still sitting on the same flat, no-shadow surface
-/// treatment (`CLARITY_DESIGN_SYSTEM.md` §10) as every other card in the app — the wash is a
-/// translucent overlay, not a replacement color system.
-private struct TintedSurfaceModifier: ViewModifier {
-    var tint: Color
-    var radius: CGFloat
-    var padding: CGFloat
-
-    func body(content: Content) -> some View {
-        content
-            .padding(padding)
-            .background(
-                RoundedRectangle(cornerRadius: radius)
-                    .fill(Color.surfaceSecondary)
-                    .overlay(RoundedRectangle(cornerRadius: radius).fill(tint.opacity(0.08)))
-            )
-    }
-}
-
 private extension View {
     func compactHeroAmountStyle() -> some View {
         modifier(CompactHeroAmountStyle())
-    }
-
-    func claritySurface(tint: Color, radius: CGFloat = ClarityRadius.large, padding: CGFloat = ClaritySpacing.lg) -> some View {
-        modifier(TintedSurfaceModifier(tint: tint, radius: radius, padding: padding))
     }
 }
 
@@ -749,171 +723,90 @@ struct HomeView: View {
 
     // MARK: - Clarity Score
 
-    private var clarityScoreTrendBadge: (delta: String, direction: DeltaIndicator.Direction, isFavorable: Bool?)? {
-        switch clarityScoreResult.trend {
-        case .up: ("+\(clarityScoreResult.pointsChange ?? 0)", .up, true)
-        case .down: ("\(clarityScoreResult.pointsChange ?? 0)", .down, false)
-        case .stable: ("±0", .flat, nil)
-        case .notEnoughHistory: nil
-        }
-    }
-
-    /// Builds the actual phrasing for a factor from its raw data — `ClarityScoreCalculator`
-    /// deliberately returns numbers, not sentences, so this (and not the calculator) owns the
-    /// wording, matching `WhatsDifferentRow.message`'s split of data vs. phrasing.
-    private func clarityScoreFactorTitle(_ factor: ClarityScoreFactor) -> String {
-        let percent = factor.magnitudeFraction.formatted(.percent.precision(.fractionLength(0)))
-        return switch factor.kind {
-        case .budgetPace: factor.isFavorable ? "\(percent) under your weekly budget pace" : "\(percent) over your weekly budget pace"
-        case .previousWeek: factor.isFavorable ? "\(percent) lower than last week" : "\(percent) higher than last week"
-        case .typicalWeek: factor.isFavorable ? "\(percent) below your typical week" : "\(percent) above your typical week"
-        case .monthOverMonth: factor.isFavorable ? "\(percent) lower than this point last month" : "\(percent) higher than this point last month"
-        }
-    }
-
-    /// Short (1-2 word) label for the compact factor strip beneath the score — the sentence-level
-    /// phrasing belongs to `clarityScoreFactorTitle`/`clarityScoreSummary` above; this exists only
-    /// so `clarityScoreFactorsStrip` can lay out a percent + label pair per factor without
-    /// truncating a full sentence.
-    private func clarityScoreFactorShortLabel(_ factor: ClarityScoreFactor) -> String {
-        switch factor.kind {
-        case .budgetPace: "budget pace"
-        case .previousWeek: "last week"
-        case .typicalWeek: "typical week"
-        case .monthOverMonth: "last month"
-        }
-    }
-
-    /// True once the score reflects at least one real comparison — either a factor that actually
-    /// contributed this week, or a genuine week-ago score to compare against (which itself
-    /// requires real spend data at that anchor, not just a budget's existence — see
-    /// `ClarityScoreCalculator.snapshot`). False only for the plain `baselineScore` default with
-    /// zero comparisons available (e.g. a brand-new user's very first days), which must not be
-    /// shown as if it were an actual measure of financial health.
-    private var clarityScoreHasSignal: Bool {
-        !clarityScoreResult.factors.isEmpty || clarityScoreResult.trend != .notEnoughHistory
-    }
-
-    private var clarityScoreSummary: String {
-        guard clarityScoreResult.score != nil else {
-            return "Log a few expenses this week to start seeing your Clarity Score."
-        }
-        guard clarityScoreHasSignal else {
-            return "Your Clarity Score will get more precise as you add more transaction history."
-        }
-        guard let topFactor = clarityScoreResult.factors.first else {
-            return "Spending is right in line with your usual pattern."
-        }
-        let trendPhrase = switch clarityScoreResult.trend {
-        case .up: "Your score improved this week"
-        case .down: "Your score dipped this week"
-        case .stable: "Your score held steady this week"
-        case .notEnoughHistory: "Here's your Clarity Score"
-        }
-        return "\(trendPhrase) — \(clarityScoreFactorTitle(topFactor))."
-    }
-
-    private var clarityScoreAccessibilityLabel: String {
-        guard let score = clarityScoreResult.score, clarityScoreHasSignal else {
-            return "Clarity Score. \(clarityScoreSummary)"
-        }
-        return "Clarity Score: \(score) out of 100, \(clarityScoreTierLabel ?? ""). \(clarityScoreSummary)"
-    }
-
-    /// A coarse, presentation-only reading of the 0-100 score — same "the view owns the wording,
-    /// not the calculator" split as `clarityScoreFactorTitle` above. Deliberately simple (3
-    /// buckets); this is a glance-level label, not a new scoring system.
-    private var clarityScoreTierLabel: String? {
-        guard let score = clarityScoreResult.score, clarityScoreHasSignal else { return nil }
-        switch score {
-        case 70...: return "Good"
-        case 40..<70: return "Fair"
-        default: return "Needs focus"
-        }
-    }
-
-    private var clarityScoreTierColor: Color {
-        guard let score = clarityScoreResult.score else { return .textSecondary }
-        switch score {
-        case 70...: return .income
-        case 40..<70: return .warning
-        default: return .expense
-        }
-    }
-
     private var clarityScoreSection: some View {
-        VStack(alignment: .leading, spacing: ClaritySpacing.md) {
-            HStack(spacing: ClaritySpacing.sm) {
-                ZStack {
-                    Circle().fill(Color.skyBlue.opacity(0.18))
-                    Image(systemName: "chart.bar.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.skyBlue)
-                }
-                .frame(width: 32, height: 32)
-
-                Text("CLARITY SCORE")
-                    .font(.caption2.weight(.semibold))
-                    .tracking(0.5)
-                    .foregroundStyle(.textSecondary)
-
-                Spacer()
-
-                if let badge = clarityScoreTrendBadge {
-                    DeltaIndicator(delta: badge.delta, direction: badge.direction, isFavorable: badge.isFavorable)
-                }
+        NavigationLink {
+            ScrollView {
+                // Home's own `month` is already always the current month (see `month` above), but
+                // `MonthInsightsDetailView` owns its own month navigation from here on regardless —
+                // same reasoning as `ExplainMyMonthCardView`'s identical call.
+                MonthInsightsDetailView()
             }
-
-            if let score = clarityScoreResult.score, clarityScoreHasSignal {
-                HStack(alignment: .center, spacing: ClaritySpacing.sm) {
-                    Text("\(score)")
-                        .compactHeroAmountStyle()
-                        .foregroundStyle(.textPrimary)
-
-                    if let clarityScoreTierLabel {
-                        Text(clarityScoreTierLabel)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(clarityScoreTierColor)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(clarityScoreTierColor.opacity(0.16), in: Capsule())
+            .darkScreenBackground()
+            .navigationTitle("Explain My Month")
+        } label: {
+            VStack(alignment: .leading, spacing: ClaritySpacing.md) {
+                HStack(spacing: ClaritySpacing.sm) {
+                    ZStack {
+                        Circle().fill(Color.skyBlue.opacity(0.18))
+                        Image(systemName: "chart.bar.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.skyBlue)
                     }
+                    .frame(width: 32, height: 32)
+
+                    Text("CLARITY SCORE")
+                        .font(.caption2.weight(.semibold))
+                        .tracking(0.5)
+                        .foregroundStyle(.textSecondary)
+
+                    Spacer()
+
+                    if let badge = ClarityScorePresentation.trendBadge(for: clarityScoreResult) {
+                        DeltaIndicator(delta: badge.delta, direction: badge.direction, isFavorable: badge.isFavorable)
+                    }
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.textTertiary)
                 }
-            }
 
-            Text(clarityScoreSummary)
-                .font(.caption)
-                .foregroundStyle(.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+                if let score = clarityScoreResult.score, ClarityScorePresentation.hasSignal(clarityScoreResult) {
+                    HStack(alignment: .center, spacing: ClaritySpacing.sm) {
+                        Text("\(score)")
+                            .compactHeroAmountStyle()
+                            .foregroundStyle(.textPrimary)
 
-            if !clarityScoreResult.factors.isEmpty {
-                Rectangle()
-                    .fill(Color.surfaceSecondary)
-                    .frame(height: 1)
-
-                HStack(alignment: .top, spacing: ClaritySpacing.md) {
-                    ForEach(clarityScoreResult.factors) { factor in
-                        VStack(alignment: .leading, spacing: 1) {
-                            DeltaIndicator(
-                                delta: factor.magnitudeFraction.formatted(.percent.precision(.fractionLength(0))),
-                                direction: factor.isFavorable ? .down : .up,
-                                isFavorable: factor.isFavorable
-                            )
-                            Text(clarityScoreFactorShortLabel(factor))
-                                .font(.caption2)
-                                .foregroundStyle(.textTertiary)
+                        if let tierLabel = ClarityScorePresentation.tierLabel(for: clarityScoreResult) {
+                            let tierColor = ClarityScorePresentation.tierColor(for: clarityScoreResult)
+                            Text(tierLabel)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(tierColor)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(tierColor.opacity(0.16), in: Capsule())
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(clarityScoreFactorTitle(factor))
                     }
                 }
+
+                Text(ClarityScorePresentation.summary(clarityScoreResult))
+                    .font(.caption)
+                    .foregroundStyle(.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // Progress rings (budget pace / last week / typical week) — moved here from
+                // "Explain My Month" per the product decision that the Home card itself should
+                // carry the full breakdown, so that screen no longer repeats it.
+                if !clarityScoreResult.factors.isEmpty {
+                    Rectangle()
+                        .fill(Color.surfaceSecondary)
+                        .frame(height: 1)
+                        .padding(.vertical, ClaritySpacing.xs)
+
+                    HStack(spacing: ClaritySpacing.lg) {
+                        ForEach(clarityScoreResult.factors) { factor in
+                            ClarityScoreFactorRing(factor: factor)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .buttonStyle(.plain)
         .claritySurface(tint: .skyBlue, padding: ClaritySpacing.md)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(clarityScoreAccessibilityLabel)
+        .accessibilityLabel(ClarityScorePresentation.accessibilityLabel(clarityScoreResult))
+        .accessibilityHint("Double tap to see a detailed breakdown of this month")
     }
 
     // MARK: - What's Different?
@@ -954,7 +847,7 @@ struct HomeView: View {
                             // `.ignoresSafeArea()` + fixed frame with no `ScrollView` above it
                             // left content stuck with no way to reach what scrolled off-screen.
                             ScrollView {
-                                InsightsView(month: month)
+                                InsightsView(month: month, allEntries: allEntries, allBudgets: allBudgets, headCategories: headCategories)
                             }
                             .darkScreenBackground()
                             .navigationTitle("Insights")
@@ -1187,6 +1080,43 @@ private struct UpcomingRow: View {
         .accessibilityLabel(
             "\(item.event.title), \(item.amount > 0 ? "you are owed" : "you owe") \(abs(item.amount).currencyFormatted)"
         )
+    }
+}
+
+/// One Clarity Score factor as a small ring — favorable fills `.success`, unfavorable fills
+/// `.warning`, the exact same mapping `DeltaIndicator` already uses for this data, just drawn as a
+/// progress ring instead of an arrow + percent. Moved here from `MonthInsightsDetailView` — see
+/// `clarityScoreSection`'s own comment.
+private struct ClarityScoreFactorRing: View {
+    let factor: ClarityScoreFactor
+
+    private var ringColor: Color { factor.isFavorable ? .success : .warning }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle().stroke(Color.surfaceSecondary, lineWidth: 6)
+                Circle()
+                    .trim(from: 0, to: min(factor.magnitudeFraction, 1))
+                    .stroke(ringColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text(factor.magnitudeFraction.formatted(.percent.precision(.fractionLength(0))))
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.textPrimary)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+            }
+            .frame(width: 56, height: 56)
+
+            Text(ClarityScorePresentation.factorShortLabel(factor))
+                .font(.caption2)
+                .foregroundStyle(.textTertiary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(ClarityScorePresentation.factorTitle(factor))
     }
 }
 
